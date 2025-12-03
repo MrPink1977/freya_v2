@@ -81,35 +81,70 @@ This 12-week plan is designed to deliver a functional and increasingly capable s
 
 ---
 
-### Phase 1.5: MCP Gateway & Tool Ecosystem (Weeks 3-4) 🔥 NEXT
+### Phase 1.5: MCP Gateway & Tool Ecosystem (Weeks 3-4) ✅ COMPLETE
 
 **Goal**: Build the MCP Gateway to enable tool usage. This makes Freya actually useful, not just a chatbot.
 
 - **Tasks**:
-    1.  **Deploy MCP Gateway Service**: Create `MCPGateway` service using the official `mcp` Python SDK.
-    2.  **Integrate with LLM Engine**: Add tool calling capability to `LLMEngine` (function calling, tool discovery).
-    3.  **Connect Essential MCP Servers**: Configure and test 5-7 core MCP servers:
+    1.  ✅ **Deploy MCP Gateway Service**: Create `MCPGateway` service using the official `mcp` Python SDK.
+    2.  ✅ **Integrate with LLM Engine**: Add tool calling capability to `LLMEngine` (function calling, tool discovery).
+    3.  ✅ **Connect Essential MCP Servers**: Configure and test 6 core MCP servers:
         - **Filesystem MCP** (local file access) - LOCAL
-        - **Brave Search MCP** (web search) - CLOUD API
-        - **Weather MCP** (weather data) - CLOUD API
+        - **Web Search MCP** (DuckDuckGo, no API key) - FREE
+        - **Weather MCP** (US National Weather Service) - FREE
         - **Shell MCP** (system commands) - LOCAL
         - **Time/Date MCP** (current time) - LOCAL
         - **Calculator MCP** (math operations) - LOCAL
-        - **ElevenLabs MCP** (for future TTS) - CLOUD API
-    4.  **Implement Tool Discovery**: Auto-discover available tools from connected MCP servers.
-    5.  **Add Tool Execution**: Route tool calls from LLM to appropriate MCP server and return results.
-    6.  **Update System Prompt**: Make LLM aware of available tools and how to use them.
-    7.  **Testing**: Verify LLM can successfully call tools (e.g., "What's the weather?", "Search the web for...").
+    4.  ✅ **Implement Tool Discovery**: Auto-discover available tools from connected MCP servers.
+    5.  ✅ **Add Tool Execution**: Route tool calls from LLM to appropriate MCP server and return results.
+    6.  ✅ **Update System Prompt**: Make LLM aware of available tools and how to use them.
+    7.  ✅ **Testing**: Verify LLM can successfully call tools (e.g., "What's the weather?", "Search the web for...").
+    8.  ✅ **Installation Automation**: Created script to install all MCP servers automatically.
 
-- **Outcome**: Freya can now perform useful tasks like searching the web, accessing files, checking weather, and executing system commands. The tool ecosystem is in place and extensible.
+- **Outcome**: Freya can now perform useful tasks like searching the web, accessing files, checking weather, and executing system commands. The tool ecosystem is in place and extensible. **Zero API keys required!**
 
 **Estimated Time**: 1-2 weeks (8-12 hours of focused work)
 
-**Status**: 📋 **PLANNED** - Ready for implementation
+**Status**: ✅ **COMPLETE** (December 3, 2025) - Version 0.2.0
 
 ---
 
-### Phase 2: Audio Pipeline (Weeks 5-6)
+### Phase 1.75: GUI Dashboard (Week 5) 🔥 NEXT
+
+**Goal**: Build a sharp, functional GUI dashboard for development, testing, and system monitoring.
+
+- **Tasks**:
+    1.  **Setup GUI Infrastructure**: Create FastAPI backend and React/Vite frontend.
+    2.  **Implement WebSocket Connection**: Real-time communication between GUI and Freya services.
+    3.  **Build Status Dashboard**: 
+        - Service health indicators (green/yellow/red status lights)
+        - System metrics (CPU, memory, GPU usage)
+        - Active endpoint indicator
+        - MCP server connection status
+    4.  **Create Text Conversation Interface**:
+        - Chat window for text-based interaction with Freya
+        - Message history display
+        - Input field for sending messages
+    5.  **Add Logging Window**:
+        - Real-time log streaming from all services
+        - Log level filtering (DEBUG, INFO, WARNING, ERROR)
+        - Search and filter capabilities
+    6.  **Implement Tool Call Visualization**:
+        - Display when LLM calls tools
+        - Show tool arguments and results
+        - Visual indicators for tool execution status
+    7.  **Basic Styling**: Sharp, modern interface with green accent colors for status indicators.
+    8.  **Testing**: Verify GUI connects to services, displays real-time data, and handles user input.
+
+- **Outcome**: A functional GUI dashboard that provides visibility into Freya's operation, enables text-based testing, and serves as a foundation for future enhancements. Essential for development and debugging.
+
+**Estimated Time**: 1 week (6-8 hours of focused work)
+
+**Status**: 🔥 **NEXT** - Ready for implementation
+
+---
+
+### Phase 2: Audio Pipeline (Weeks 6-7)
 
 **Goal**: Enable voice interaction. Freya can listen, speak, and converse using voice in a single room.
 
@@ -126,7 +161,7 @@ This 12-week plan is designed to deliver a functional and increasingly capable s
 
 ---
 
-### Phase 3: Multi-Room & Location Awareness (Weeks 7-8)
+### Phase 3: Multi-Room & Location Awareness (Weeks 8-9)
 
 **Goal**: Enable Freya to listen and respond in multiple rooms, aware of which location is active.
 
@@ -143,7 +178,7 @@ This 12-week plan is designed to deliver a functional and increasingly capable s
 
 ---
 
-### Phase 4: Intelligent Memory (Weeks 9-10)
+### Phase 4: Intelligent Memory (Weeks 10-11)
 
 **Goal**: Upgrade Freya's memory from simple context to a persistent, intelligent system.
 
@@ -159,7 +194,7 @@ This 12-week plan is designed to deliver a functional and increasingly capable s
 
 ---
 
-### Phase 5: Vision (Weeks 11-12)
+### Phase 5: Vision (Weeks 12-13)
 
 **Goal**: Enable proactive capabilities based on visual input from the front door camera.
 
@@ -176,7 +211,7 @@ This 12-week plan is designed to deliver a functional and increasingly capable s
 
 ---
 
-### Phase 6: Personality & Polish (Week 12+)
+### Phase 6: Personality & Polish (Week 14+)
 
 **Goal**: Add Freya's unique personality and polish the user experience.
 
@@ -201,17 +236,21 @@ This 12-week plan is designed to deliver a functional and increasingly capable s
 | Original | Revised (MCP-First) | Reason |
 |----------|---------------------|--------|
 | Phase 2: Multi-room audio | Phase 1.5: MCP Gateway | MCP is foundational, not optional |
-| Phase 3: MCP Gateway | Phase 2: Audio Pipeline | Audio depends on having tools available |
+| Phase 3: MCP Gateway | Phase 1.75: GUI Dashboard | GUI needed for development/testing |
+| GUI in Phase 6 | Phase 2: Audio Pipeline | Audio depends on having tools available |
 | TTS: Direct SDK | TTS: ElevenLabs MCP | Consistent MCP architecture |
 | Tools in Week 5-6 | Tools in Week 3-4 | Earlier access to useful functionality |
+| GUI in Week 11-12 | GUI in Week 5 | Essential for debugging and demos |
 
 ### Why This is Better:
 
 1. **Freya is useful earlier** - Week 3-4 instead of Week 5-6
-2. **No rework needed** - TTS uses MCP from day 1
-3. **True to vision** - "Rebuilt for MCP" is reflected in implementation
-4. **Better architecture** - MCP is infrastructure, not an add-on
-5. **Extensible from start** - Adding new tools is just configuration
+2. **GUI available for development** - Week 5 instead of Week 11-12
+3. **No rework needed** - TTS uses MCP from day 1
+4. **True to vision** - "Rebuilt for MCP" is reflected in implementation
+5. **Better architecture** - MCP is infrastructure, not an add-on
+6. **Extensible from start** - Adding new tools is just configuration
+7. **Easier debugging** - GUI provides visibility into all services early
 
 ---
 
