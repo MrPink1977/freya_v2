@@ -44,6 +44,8 @@ dependencies = [
     
     # MCP
     "mcp>=1.0.0",
+    "httpx>=0.25.0",  # HTTP client for MCP servers
+    "aiofiles>=23.2.0",  # Async file operations
     
     # Vision
     "opencv-python>=4.9.0",

@@ -1,0 +1,110 @@
+# MCP Servers Configuration for Freya v2.0
+#
+# This file defines all MCP servers that Freya can connect to.
+# Each server provides tools that extend Freya's capabilities.
+#
+# Server Types:
+#   - LOCAL: Runs entirely on your machine, no internet required
+#   - CLOUD: Requires internet and possibly API keys
+#
+# Installation:
+#   Run: bash scripts/install_mcp_servers.sh
+#
+# Date: 2025-12-03
+# Version: 1.0
+
+mcp_servers:
+  # ==================== LOCAL SERVERS ====================
+
+  # Filesystem MCP - Browse and manipulate local files
+  filesystem:
+    enabled: true
+    type: local
+    command: npx
+    args:
+      - "@modelcontextprotocol/server-filesystem"
+      - "/home/user"  # Root directory for file access
+    description: "Local file system access for reading, writing, and managing files"
+    privacy: "100% local, no data leaves your machine"
+
+  # Shell MCP - Execute system commands
+  shell:
+    enabled: true
+    type: local
+    command: npx
+    args:
+      - "@modelcontextprotocol/server-shell"
+    description: "Execute system shell commands"
+    privacy: "100% local, no data leaves your machine"
+
+  # Time/Date MCP - Current time and date utilities
+  time:
+    enabled: true
+    type: local
+    command: npx
+    args:
+      - "@modelcontextprotocol/server-time"
+    description: "Current time, date calculations, and timezone conversions"
+    privacy: "100% local, no data leaves your machine"
+
+  # Calculator MCP - Mathematical operations
+  calculator:
+    enabled: true
+    type: local
+    command: npx
+    args:
+      - "@modelcontextprotocol/server-calculator"
+    description: "Perform mathematical calculations"
+    privacy: "100% local, no data leaves your machine"
+
+  # ==================== COMMUNITY SERVERS ====================
+
+  # Web Search MCP - Local web search (no API key required!)
+  web-search:
+    enabled: true
+    type: local
+    command: node
+    args:
+      - "/home/user/mcp-servers/web-search-mcp/dist/index.js"
+    description: "Web search without API keys (uses DuckDuckGo)"
+    privacy: "Queries go to DuckDuckGo, but no API key tracking"
+    installation: |
+      cd /home/user/mcp-servers
+      git clone https://github.com/ac3xx/web-search-mcp.git
+      cd web-search-mcp
+      npm install
+      npm run build
+
+  # NWS Weather MCP - US National Weather Service (free government API)
+  nws-weather:
+    enabled: true
+    type: cloud-free
+    command: node
+    args:
+      - "/home/user/mcp-servers/nws-mcp-server/dist/index.js"
+    description: "Weather data from US National Weather Service (no API key!)"
+    privacy: "Free US government API, no tracking or API keys"
+    installation: |
+      cd /home/user/mcp-servers
+      git clone https://github.com/danhilse/nws-mcp-server.git
+      cd nws-mcp-server
+      npm install
+      npm run build
+
+# ==================== STATISTICS ====================
+# Total Servers: 6
+# Local Servers: 4 (filesystem, shell, time, calculator)
+# Community Servers: 2 (web-search, nws-weather)
+# API Keys Required: 0
+# Monthly Cost: $0.00
+# Privacy Rating: Excellent (5/6 fully local, 1/6 free gov API)
+
+# ==================== FUTURE SERVERS ====================
+# These can be added later as needed:
+#
+# - sqlite-mcp: Local database access
+# - git-mcp: Git repository operations
+# - docker-mcp: Container management
+# - spotify-mcp: Music control (local client)
+# - home-assistant-mcp: Smart home (via local HA)
+# - elevenlabs-mcp: High-quality TTS (Phase 2, requires API key)

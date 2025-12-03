@@ -20,7 +20,7 @@ from src.core.message_bus import MessageBus, MessageBusError
 from src.core.base_service import BaseService, ServiceError
 from src.core.config import config
 from src.services.llm.llm_engine import LLMEngine
-from src.services.stt import STTService
+from src.services.mcp_gateway import MCPGateway
 
 
 class FreyaOrchestrator:
@@ -81,7 +81,17 @@ class FreyaOrchestrator:
             
             # Initialize services
             logger.info("Initializing services...")
-            
+
+            # Phase 1.5: MCP Gateway (must initialize before LLM Engine)
+            if config.mcp_enabled:
+                logger.info("  - Initializing MCP Gateway...")
+                mcp_gateway = MCPGateway(self.message_bus)
+                await mcp_gateway.initialize()
+                self.services.append(mcp_gateway)
+                logger.success("  ✓ MCP Gateway initialized")
+            else:
+                logger.warning("  ⚠️  MCP Gateway disabled in configuration")
+
             # Phase 1: LLM Engine
             logger.info("  - Initializing LLM Engine...")
             llm_engine = LLMEngine(self.message_bus)
@@ -89,18 +99,16 @@ class FreyaOrchestrator:
             self.services.append(llm_engine)
             logger.success("  ✓ LLM Engine initialized")
 
-            # Phase 2: STT Service
-            logger.info("  - Initializing STT Service...")
-            stt_service = STTService(self.message_bus)
-            await stt_service.initialize()
-            self.services.append(stt_service)
-            logger.success("  ✓ STT Service initialized")
-
-            # TODO Phase 2: Add Audio Manager and TTS services
+            # TODO Phase 2: Add Audio, STT, TTS services
             # logger.info("  - Initializing Audio Manager...")
             # audio_manager = AudioManager(self.message_bus)
             # await audio_manager.initialize()
             # self.services.append(audio_manager)
+            
+            # logger.info("  - Initializing STT Service...")
+            # stt_service = STTService(self.message_bus)
+            # await stt_service.initialize()
+            # self.services.append(stt_service)
             
             # logger.info("  - Initializing TTS Service...")
             # tts_service = TTSService(self.message_bus)

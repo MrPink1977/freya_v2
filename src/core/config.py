@@ -182,37 +182,15 @@ class FreyaConfig(BaseSettings):
         description="Whisper model size",
         examples=["tiny", "base", "small", "medium", "large"]
     )
-
+    
     stt_language: str = Field(
         default="en",
         description="Primary language for STT"
     )
-
+    
     stt_device: Literal["cpu", "cuda", "auto"] = Field(
         default="auto",
         description="Device for STT inference"
-    )
-
-    stt_compute_type: Literal["int8", "int8_float16", "float16", "float32"] = Field(
-        default="float16",
-        description="Compute type for STT model (affects speed and memory)"
-    )
-
-    stt_beam_size: int = Field(
-        default=5,
-        ge=1,
-        le=10,
-        description="Beam size for STT decoding (higher=better quality, slower)"
-    )
-
-    stt_vad_filter: bool = Field(
-        default=True,
-        description="Enable Voice Activity Detection to filter silence"
-    )
-
-    stt_condition_on_previous_text: bool = Field(
-        default=True,
-        description="Condition on previous text for better context"
     )
     
     # ==================== GUI Configuration ====================
@@ -232,7 +210,49 @@ class FreyaConfig(BaseSettings):
         default=True,
         description="Enable CORS for GUI backend"
     )
-    
+
+    # ==================== MCP Configuration ====================
+    mcp_enabled: bool = Field(
+        default=True,
+        description="Enable MCP Gateway service"
+    )
+
+    mcp_servers_config: str = Field(
+        default="config/mcp_servers.yaml",
+        description="Path to MCP servers configuration file"
+    )
+
+    mcp_connection_timeout: int = Field(
+        default=30,
+        ge=5,
+        le=120,
+        description="MCP server connection timeout in seconds"
+    )
+
+    mcp_tool_timeout: int = Field(
+        default=60,
+        ge=10,
+        le=300,
+        description="Tool execution timeout in seconds"
+    )
+
+    mcp_retry_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of retry attempts for failed operations"
+    )
+
+    mcp_cache_tool_schemas: bool = Field(
+        default=True,
+        description="Cache tool schemas to reduce discovery overhead"
+    )
+
+    mcp_log_tool_calls: bool = Field(
+        default=True,
+        description="Log all tool calls and results for debugging"
+    )
+
     # ==================== Logging Configuration ====================
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO",
