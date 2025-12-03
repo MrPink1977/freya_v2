@@ -1,0 +1,124 @@
+
+graph TD
+    subgraph User Interface
+        WebGUI["Web Dashboard GUI"]
+    end
+
+    subgraph Endpoints
+        direction LR
+        EP_Bedroom["Bedroom Endpoint<br>(Mic/Speaker)"]
+        EP_FrontDoor["Front Door Endpoint<br>(Mic/Speaker/Camera)"]
+    end
+
+    subgraph Core Services
+        direction LR
+        AudioManager["Audio Manager"]
+        VisionService["Vision Service"]
+        STT["STT Service<br>faster-whisper"]
+        TTS["TTS Service<br>ElevenLabs"]
+        LLMEngine["LLM Engine<br>Ollama / RTX 5060Ti"]
+        MemoryManager["Memory Manager<br>Adaptive Memory v3"]
+        Personality["Personality Manager"]
+        MCPGateway["MCP Gateway<br>MetaMCP / MCPX"]
+    end
+
+    subgraph Data Layer
+        direction LR
+        ChromaDB["Vector DB<br>ChromaDB"]
+        ConfigDB["Config & Logs"]
+    end
+
+    subgraph External Services
+        direction LR
+        MCP_FileSystem["File System MCP"]
+        MCP_WebSearch["Web Search MCP"]
+        MCP_Spotify["Spotify MCP"]
+        MCP_HomeAssistant["Home Assistant MCP"]
+        MCP_Other["..."] 
+    end
+
+    subgraph Communication
+        MessageBus["Message Bus<br>Redis Pub/Sub"]
+        WebServer["Web Server<br>FastAPI"]
+    end
+
+    %% Connections
+    EP_Bedroom -- "Audio Stream" --> AudioManager
+    EP_FrontDoor -- "Audio & Video Stream" --> AudioManager
+    AudioManager -- "Video Stream" --> VisionService
+    
+    AudioManager -- "Audio for STT" --> MessageBus
+    MessageBus -- "Audio for STT" --> STT
+
+    STT -- "Transcribed Text" --> MessageBus
+    MessageBus -- "Transcribed Text" --> LLMEngine
+
+    LLMEngine -- "Memory Query" --> MessageBus
+    MessageBus -- "Memory Query" --> MemoryManager
+    MemoryManager -- "Retrieved Memories" --> MessageBus
+    MessageBus -- "Retrieved Memories" --> LLMEngine
+
+    LLMEngine -- "Tool Query" --> MessageBus
+    MessageBus -- "Tool Query" --> MCPGateway
+    MCPGateway -- "Tool Call" --> MCP_FileSystem
+    MCPGateway -- "Tool Call" --> MCP_WebSearch
+    MCPGateway -- "Tool Call" --> MCP_Spotify
+    MCPGateway -- "Tool Call" --> MCP_HomeAssistant
+    MCPGateway -- "Tool Call" --> MCP_Other
+    MCP_FileSystem -- "Tool Result" --> MCPGateway
+    MCP_WebSearch -- "Tool Result" --> MCPGateway
+    MCP_Spotify -- "Tool Result" --> MCPGateway
+    MCP_HomeAssistant -- "Tool Result" --> MCPGateway
+    MCP_Other -- "Tool Result" --> MCPGateway
+    MCPGateway -- "Tool Result" --> MessageBus
+    MessageBus -- "Tool Result" --> LLMEngine
+
+    LLMEngine -- "Personality Context" --> MessageBus
+    MessageBus -- "Personality Context" --> Personality
+    Personality -- "Final Prompt" --> MessageBus
+    MessageBus -- "Final Prompt" --> LLMEngine
+
+    LLMEngine -- "Response Text" --> MessageBus
+    MessageBus -- "Response Text" --> TTS
+    TTS -- "Audio for Playback" --> MessageBus
+    MessageBus -- "Audio for Playback" --> AudioManager
+    AudioManager -- "Playback to Endpoint" --> EP_Bedroom
+    AudioManager -- "Playback to Endpoint" --> EP_FrontDoor
+
+    MemoryManager -- "Store/Retrieve" --> ChromaDB
+    
+    VisionService -- "Alerts (Motion, Person)" --> MessageBus
+    MessageBus -- "Alerts" --> LLMEngine
+
+    %% GUI Connections
+    WebGUI -- "HTTP/WebSocket" --> WebServer
+    WebServer -- "Subscribe/Publish" --> MessageBus
+    MessageBus -- "System Events, Logs, Chat" --> WebServer
+
+    %% Config/Logging
+    subgraph Core Services
+      style Core Services fill:transparent,stroke:transparent
+      subgraph Data Layer
+        style Data Layer fill:transparent,stroke:transparent
+      end
+    end
+    CoreServices -- "Read/Write" --> ConfigDB
+    MCPGateway -- "Read/Write" --> ConfigDB
+
+    classDef endpoint fill:#D6EAF8,stroke:#333,stroke-width:2px;
+    class EP_Bedroom,EP_FrontDoor endpoint;
+
+    classDef core fill:#D5F5E3,stroke:#333,stroke-width:2px;
+    class AudioManager,VisionService,STT,TTS,LLMEngine,MemoryManager,Personality,MCPGateway core;
+
+    classDef data fill:#FCF3CF,stroke:#333,stroke-width:2px;
+    class ChromaDB,ConfigDB data;
+
+    classDef external fill:#EBDEF0,stroke:#333,stroke-width:2px;
+    class MCP_FileSystem,MCP_WebSearch,MCP_Spotify,MCP_HomeAssistant,MCP_Other external;
+
+    classDef comms fill:#FADBD8,stroke:#333,stroke-width:2px;
+    class MessageBus,WebServer comms;
+
+    classDef ui fill:#E8DAEF,stroke:#333,stroke-width:2px;
+    class WebGUI ui;
