@@ -64,7 +64,8 @@ services:
       chromadb:
         condition: service_started
     ports:
-      - "8080:8080"  # GUI Backend
+      - "8000:8000"  # GUI Backend API
+      - "5173:5173"  # Vite Dev Server
     volumes:
       - ./src:/app/src
       - ./config:/app/config

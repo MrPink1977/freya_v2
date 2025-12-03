@@ -189,6 +189,11 @@ Always be helpful, accurate, and maintain your personality consistently."""
                 await self.message_bus.subscribe("mcp.tool.result", self._handle_tool_result)
                 logger.info(f"[{self.name}] Subscribed to MCP tool channels")
 
+            # Subscribe to GUI user messages (Phase 1.75)
+            if config.gui_enabled:
+                await self.message_bus.subscribe("gui.user.message", self._handle_gui_message)
+                logger.info(f"[{self.name}] Subscribed to gui.user.message")
+
             await self.publish_status("started", {
                 "model": config.ollama_model,
                 "personality": config.personality_style,
@@ -214,6 +219,11 @@ Always be helpful, accurate, and maintain your personality consistently."""
 
             await self.message_bus.unsubscribe("stt.transcription")
             logger.debug(f"[{self.name}] Unsubscribed from stt.transcription")
+
+            # Unsubscribe from GUI channel if enabled
+            if config.gui_enabled:
+                await self.message_bus.unsubscribe("gui.user.message")
+                logger.debug(f"[{self.name}] Unsubscribed from gui.user.message")
 
             # Unsubscribe from MCP channels if enabled
             if config.mcp_enabled:
@@ -307,7 +317,72 @@ Always be helpful, accurate, and maintain your personality consistently."""
                 "location": data.get("location", "unknown"),
                 "error": True
             })
-        
+
+    async def _handle_gui_message(self, data: Dict[str, Any]) -> None:
+        """
+        Handle incoming user messages from GUI.
+
+        Args:
+            data: Message containing:
+                - content (str): User's message text
+                - source (str): Source identifier ("web_gui")
+                - timestamp (str): ISO format timestamp
+        """
+        try:
+            user_text = data.get("content", "").strip()
+            source = data.get("source", "web_gui")
+            timestamp_str = data.get("timestamp", datetime.now().isoformat())
+
+            if not user_text:
+                logger.warning(f"[{self.name}] Received empty message from GUI")
+                return
+
+            logger.info(
+                f"[{self.name}] 📝 [GUI] User: \"{user_text}\""
+            )
+
+            # Publish thinking status for GUI
+            await self.message_bus.publish("llm.thinking", {
+                "status": "processing",
+                "input": user_text,
+                "location": source
+            })
+
+            # Generate response
+            start_time = datetime.now()
+            response = await self._generate_response(user_text, source)
+            generation_time = (datetime.now() - start_time).total_seconds()
+
+            # Publish metrics
+            await self.publish_metric("generation_time", generation_time, "seconds")
+            await self.publish_metric("input_length", len(user_text), "characters")
+            await self.publish_metric("output_length", len(response), "characters")
+
+            # Publish final response for GUI display
+            await self.message_bus.publish("llm.final_response", {
+                "response": response,
+                "location": source,
+                "timestamp": datetime.now().isoformat(),
+                "generation_time": generation_time
+            })
+
+            logger.info(
+                f"[{self.name}] 💬 [GUI] Freya: \"{response}\" "
+                f"({generation_time:.2f}s)"
+            )
+
+        except Exception as e:
+            logger.exception(f"[{self.name}] Error handling GUI message: {e}")
+            self.increment_error_count()
+
+            # Send error response
+            await self.message_bus.publish("llm.final_response", {
+                "response": "I'm sorry, I encountered an error processing that. Could you try again?",
+                "location": data.get("source", "web_gui"),
+                "error": True,
+                "timestamp": datetime.now().isoformat()
+            })
+
     async def _generate_response(self, user_input: str, location: str) -> str:
         """
         Generate a response using the LLM.
