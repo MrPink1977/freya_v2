@@ -14,6 +14,7 @@ from loguru import logger
 import ollama
 from datetime import datetime
 import asyncio
+import uuid
 
 from src.core.base_service import BaseService, ServiceError
 from src.core.message_bus import MessageBus
@@ -68,7 +69,12 @@ class LLMEngine(BaseService):
         self.max_history_length = config.memory_max_short_term
         self._generation_count = 0
         self._total_tokens = 0
-        
+
+        # Tool calling support (Phase 1.5)
+        self.available_tools: Dict[str, Any] = {}
+        self.tool_call_count = 0
+        self._pending_tool_results: Dict[str, Any] = {}
+
         logger.debug(f"[{self.name}] Initialized with model: {config.ollama_model}")
         
     def _build_system_prompt(self) -> str:
@@ -172,14 +178,21 @@ Always be helpful, accurate, and maintain your personality consistently."""
                 raise LLMEngineError("Cannot start unhealthy service. Call initialize() first.")
                 
             self._mark_started()
-            
+
             # Subscribe to transcribed text from STT
             await self.message_bus.subscribe("stt.transcription", self._handle_transcription)
             logger.info(f"[{self.name}] Subscribed to stt.transcription")
-            
+
+            # Subscribe to tool registry from MCP Gateway (Phase 1.5)
+            if config.mcp_enabled:
+                await self.message_bus.subscribe("mcp.tool.registry", self._handle_tool_registry)
+                await self.message_bus.subscribe("mcp.tool.result", self._handle_tool_result)
+                logger.info(f"[{self.name}] Subscribed to MCP tool channels")
+
             await self.publish_status("started", {
                 "model": config.ollama_model,
-                "personality": config.personality_style
+                "personality": config.personality_style,
+                "tools_enabled": config.mcp_enabled
             })
             
             logger.success(f"[{self.name}] ✓ LLM Engine started and ready")
@@ -198,10 +211,16 @@ Always be helpful, accurate, and maintain your personality consistently."""
         """
         try:
             logger.info(f"[{self.name}] Stopping LLM Engine...")
-            
+
             await self.message_bus.unsubscribe("stt.transcription")
             logger.debug(f"[{self.name}] Unsubscribed from stt.transcription")
-            
+
+            # Unsubscribe from MCP channels if enabled
+            if config.mcp_enabled:
+                await self.message_bus.unsubscribe("mcp.tool.registry")
+                await self.message_bus.unsubscribe("mcp.tool.result")
+                logger.debug(f"[{self.name}] Unsubscribed from MCP tool channels")
+
             self._mark_stopped()
             
             await self.publish_status("stopped", {
@@ -335,17 +354,85 @@ Always be helpful, accurate, and maintain your personality consistently."""
                 })
             
             logger.debug(f"[{self.name}] Generating response with {len(messages)} messages")
-            
-            # Generate response
-            response = await self.client.chat(
-                model=config.ollama_model,
-                messages=messages,
-                options={
-                    "temperature": config.ollama_temperature,
-                }
-            )
-            
-            assistant_response = response['message']['content'].strip()
+
+            # Prepare tools for Ollama if available and MCP is enabled
+            tools_param = None
+            if config.mcp_enabled and self.available_tools:
+                tools_param = list(self.available_tools.values())
+                logger.debug(
+                    f"[{self.name}] Including {len(tools_param)} tools in LLM call"
+                )
+
+            # Generate response (with potential tool calls)
+            max_tool_iterations = 5  # Prevent infinite tool calling loops
+            iteration = 0
+
+            while iteration < max_tool_iterations:
+                iteration += 1
+
+                # Call LLM
+                response = await self.client.chat(
+                    model=config.ollama_model,
+                    messages=messages,
+                    tools=tools_param,
+                    options={
+                        "temperature": config.ollama_temperature,
+                    }
+                )
+
+                assistant_message = response['message']
+
+                # Check if LLM wants to call tools
+                tool_calls = assistant_message.get('tool_calls')
+
+                if not tool_calls:
+                    # No tool calls - we have the final response
+                    assistant_response = assistant_message.get('content', '').strip()
+                    break
+
+                # LLM wants to call tools
+                logger.info(
+                    f"[{self.name}] 🔧 LLM requested {len(tool_calls)} tool call(s)"
+                )
+
+                # Add assistant's tool call message to history
+                messages.append(assistant_message)
+
+                # Execute each tool call
+                for tool_call in tool_calls:
+                    function = tool_call.get('function', {})
+                    tool_name = function.get('name')
+                    arguments = function.get('arguments', {})
+
+                    try:
+                        # Execute the tool
+                        result = await self._execute_tool_call(tool_name, arguments)
+
+                        # Add tool result to messages
+                        messages.append({
+                            "role": "tool",
+                            "content": str(result)
+                        })
+
+                    except LLMEngineError as e:
+                        logger.error(f"[{self.name}] Tool execution failed: {e}")
+                        # Add error as tool result
+                        messages.append({
+                            "role": "tool",
+                            "content": f"Error executing {tool_name}: {str(e)}"
+                        })
+
+                # Continue loop to let LLM process tool results
+                logger.debug(
+                    f"[{self.name}] Tool execution complete, getting final response..."
+                )
+
+            else:
+                # Hit max iterations
+                logger.warning(
+                    f"[{self.name}] Reached max tool calling iterations ({max_tool_iterations})"
+                )
+                assistant_response = "I apologize, but I'm having trouble completing that request. Could you try rephrasing it?"
             
             # Track metrics
             self._generation_count += 1
@@ -382,7 +469,139 @@ Always be helpful, accurate, and maintain your personality consistently."""
             logger.exception(f"[{self.name}] {error_msg}")
             self.increment_error_count()
             raise LLMEngineError(error_msg) from e
-            
+
+    async def _handle_tool_registry(self, data: Dict[str, Any]) -> None:
+        """
+        Handle tool registry updates from MCP Gateway.
+
+        Args:
+            data: Tool registry message with format:
+                {
+                    "tools": List[Dict],
+                    "tool_count": int,
+                    "servers": List[str],
+                    "timestamp": str
+                }
+        """
+        try:
+            tools = data.get("tools", [])
+            tool_count = data.get("tool_count", 0)
+
+            # Convert to format suitable for Ollama
+            self.available_tools = {}
+            for tool in tools:
+                tool_name = tool.get("name")
+                if tool_name:
+                    self.available_tools[tool_name] = {
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "description": tool.get("description", ""),
+                            "parameters": tool.get("inputSchema", {})
+                        }
+                    }
+
+            logger.info(
+                f"[{self.name}] 🔧 Tool registry updated: {tool_count} tools available"
+            )
+
+            if config.mcp_log_tool_calls:
+                logger.debug(
+                    f"[{self.name}] Available tools: {list(self.available_tools.keys())}"
+                )
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Error handling tool registry: {e}")
+
+    async def _handle_tool_result(self, data: Dict[str, Any]) -> None:
+        """
+        Handle tool execution results from MCP Gateway.
+
+        Args:
+            data: Tool result message with format:
+                {
+                    "request_id": str,
+                    "tool_name": str,
+                    "result": Any,
+                    "success": bool,
+                    "error": str (optional),
+                    "duration": float
+                }
+        """
+        try:
+            request_id = data.get("request_id")
+            if request_id:
+                self._pending_tool_results[request_id] = data
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Error handling tool result: {e}")
+
+    async def _execute_tool_call(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Execute a tool call via MCP Gateway.
+
+        Args:
+            tool_name: Name of the tool to call
+            arguments: Tool arguments
+
+        Returns:
+            Tool execution result
+
+        Raises:
+            LLMEngineError: If tool execution fails
+        """
+        try:
+            request_id = str(uuid.uuid4())
+
+            logger.info(f"[{self.name}] 🔧 Executing tool: {tool_name}")
+
+            if config.mcp_log_tool_calls:
+                logger.debug(f"[{self.name}] Tool arguments: {arguments}")
+
+            # Send tool execution request
+            await self.message_bus.publish("mcp.tool.execute", {
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "arguments": arguments
+            })
+
+            # Wait for result (with timeout)
+            timeout = config.mcp_tool_timeout
+            start_time = datetime.now()
+
+            while (datetime.now() - start_time).total_seconds() < timeout:
+                if request_id in self._pending_tool_results:
+                    result_data = self._pending_tool_results.pop(request_id)
+
+                    if result_data.get("success"):
+                        logger.success(
+                            f"[{self.name}] ✓ Tool '{tool_name}' completed in "
+                            f"{result_data.get('duration', 0):.2f}s"
+                        )
+                        self.tool_call_count += 1
+                        return result_data.get("result")
+                    else:
+                        error = result_data.get("error", "Unknown error")
+                        raise LLMEngineError(f"Tool execution failed: {error}")
+
+                await asyncio.sleep(0.1)
+
+            # Timeout
+            raise LLMEngineError(
+                f"Tool execution timed out after {timeout}s"
+            )
+
+        except LLMEngineError:
+            raise
+        except Exception as e:
+            error_msg = f"Tool execution error for '{tool_name}': {e}"
+            logger.error(f"[{self.name}] {error_msg}")
+            raise LLMEngineError(error_msg) from e
+
     async def health_check(self) -> bool:
         """
         Perform a health check on the LLM Engine.

@@ -1,6 +1,6 @@
 [project]
 name = "freya-v2"
-version = "0.1.0"
+version = "0.2.0"
 description = "A location-aware, multi-room personal AI assistant with persistent memory and MCP integration"
 authors = [
     {name = "MrPink1977", email = "your.email@example.com"}
@@ -44,6 +44,8 @@ dependencies = [
     
     # MCP
     "mcp>=1.0.0",
+    "httpx>=0.25.0",  # HTTP client for MCP servers
+    "aiofiles>=23.2.0",  # Async file operations
     
     # Vision
     "opencv-python>=4.9.0",
