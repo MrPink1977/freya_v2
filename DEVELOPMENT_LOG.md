@@ -3,8 +3,9 @@
 **Purpose**: This is a living document that tracks all development activities, changes, decisions, and progress on Freya v2.0. Update this file every time you make changes to the codebase.
 
 **Last Updated**: 2025-12-03  
-**Current Phase**: Phase 1 Complete / Phase 2 Planning  
-**Current Version**: 0.1.0
+**Current Phase**: Phase 1 Complete / Phase 1.5 Planning (MCP Gateway)  
+**Current Version**: 0.1.0  
+**Architecture**: 🔥 **MCP-FIRST** (Revised December 3, 2025)
 
 ---
 
@@ -40,6 +41,64 @@
 ---
 
 ## Development Entries
+
+### 2025-12-03 - [Architecture] CRITICAL: MCP-First Architecture Decision
+**Changed by**: Manus AI + User Decision  
+**Commit**: [pending]
+
+**What Changed**:
+- **MAJOR ARCHITECTURAL REVISION**: Shifted to MCP-first approach
+- Created ROADMAP_V2.md (now ROADMAP.md) with revised phase order
+- Backed up original roadmap as ROADMAP_V1_ORIGINAL.md
+- Created MCP_LOCAL_VS_CLOUD.md clarifying local vs. cloud servers
+- Created MCP_INTEGRATION_ANALYSIS.md documenting the decision process
+- **New Phase Order**:
+  * Phase 1: Foundation ✅ Complete
+  * **Phase 1.5: MCP Gateway** ← NEW, NEXT
+  * Phase 2: Audio Pipeline (STT, TTS via MCP, Audio Manager)
+  * Phase 3: Multi-room & Location Awareness
+  * Phase 4: Memory
+  * Phase 5: Vision
+  * Phase 6: Personality
+
+**Why**:
+- User stated: "Freya is basically rebuilt for MCP"
+- Original roadmap delayed MCP until Phase 3 (Week 5-6)
+- This created architectural inconsistency:
+  * ARCHITECTURE.md describes MCP as core infrastructure
+  * ROADMAP.md treated it as an enhancement
+- Without MCP Gateway, Freya can't use ANY tools (web search, weather, files)
+- Multi-room audio (old Phase 2) is pointless if Freya can't do anything useful
+- Building MCP early avoids technical debt and TTS rework
+- Aligns with user's preference for quality over speed
+
+**Impact**:
+- 🔴 **BREAKING**: Phase 2 STT plan (PHASE_2_PLAN_STT.md) is now Phase 2, not immediate next
+- ✅ **MCP Gateway is now Phase 1.5** - builds tool ecosystem first
+- ✅ **TTS will use ElevenLabs MCP server** from day 1 (no rework)
+- ✅ **Freya is useful by Week 3-4** instead of Week 5-6
+- ✅ **True MCP-first architecture** - infrastructure, not add-on
+- ✅ **~75% of MCP servers are local** - privacy-first design
+- ⏱️ **Timeline**: Adds 1 week upfront, saves weeks later
+
+**Rationale**:
+- MCP Gateway enables tool calling (web search, files, weather, etc.)
+- Tools make Freya actually useful, not just a chatbot
+- Building MCP before audio ensures consistent architecture
+- No point in voice conversation if Freya can't do anything
+- Avoids refactoring TTS Service in Phase 3
+- Honors the "rebuilt for MCP" vision
+
+**Next Steps**:
+- Create PHASE_1.5_PLAN_MCP.md (detailed implementation plan)
+- Implement MCP Gateway service
+- Connect 5-7 essential MCP servers (4 local, 3 cloud)
+- Test tool calling from LLM Engine
+- THEN proceed with STT/TTS (Phase 2)
+
+**Decision Authority**: User approved "Full MCP" approach
+
+---
 
 ### 2025-12-03 - [Planning] Phase 2 STT Service Plan and Assessment
 **Changed by**: Manus AI  
