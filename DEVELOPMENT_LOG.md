@@ -2,9 +2,9 @@
 
 **Purpose**: This is a living document that tracks all development activities, changes, decisions, and progress on Freya v2.0. Update this file every time you make changes to the codebase.
 
-**Last Updated**: 2025-12-03
-**Current Phase**: Phase 1.5 Complete (MCP Gateway) / Phase 2 Next (Audio)
-**Current Version**: 0.2.0
+**Last Updated**: 2025-12-03  
+**Current Phase**: Phase 1.5 Complete (MCP Gateway) / Phase 2 Next (Audio)  
+**Current Version**: 0.2.0  
 **Architecture**: 🔥 **MCP-FIRST** (Revised December 3, 2025)
 
 ---
@@ -42,12 +42,6 @@
 
 ## Development Entries
 
-### 2025-12-03 - [Feature] ✅ PHASE 1.5 COMPLETE: MCP Gateway & Tool Calling
-**Changed by**: Claude (AI Assistant)
-**Commits**: 8ce576f (MCP Gateway core), 664aa5e (LLM tool calling)
-
-**What Changed**:
-- **MCP Gateway Service** (~650 lines)
   * Server connection management with lifecycle handling
   * Tool discovery from multiple MCP servers
   * Unified tool registry published to message bus
