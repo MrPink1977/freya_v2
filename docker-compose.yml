@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # Redis Message Bus
+  redis:
+    image: redis:7-alpine
+    container_name: freya-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - freya-network
+
+  # Ollama LLM Server
+  ollama:
+    image: ollama/ollama:latest
+    container_name: freya-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - freya-network
+
+  # ChromaDB Vector Database
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: freya-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadb-data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    networks:
+      - freya-network
+
+  # Freya Core Application
+  freya-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: freya-core
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+      chromadb:
+        condition: service_started
+    ports:
+      - "8080:8080"  # GUI Backend
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./data:/app/data
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - OLLAMA_HOST=http://ollama:11434
+      - CHROMADB_HOST=chromadb
+      - CHROMADB_PORT=8000
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - PORCUPINE_ACCESS_KEY=${PORCUPINE_ACCESS_KEY}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - freya-network
+    command: python -m src.main
+
+volumes:
+  redis-data:
+  ollama-data:
+  chromadb-data:
+
+networks:
+  freya-network:
+    driver: bridge
