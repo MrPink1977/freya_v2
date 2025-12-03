@@ -23,7 +23,7 @@ mcp_servers:
     command: npx
     args:
       - "@modelcontextprotocol/server-filesystem"
-      - "/home/user"  # Root directory for file access
+      - "/home/ubuntu"  # Root directory for file access
     description: "Local file system access for reading, writing, and managing files"
     privacy: "100% local, no data leaves your machine"
 
@@ -65,11 +65,11 @@ mcp_servers:
     type: local
     command: node
     args:
-      - "/home/user/mcp-servers/web-search-mcp/dist/index.js"
+      - "/home/ubuntu/mcp-servers/web-search-mcp/dist/index.js"
     description: "Web search without API keys (uses DuckDuckGo)"
     privacy: "Queries go to DuckDuckGo, but no API key tracking"
     installation: |
-      cd /home/user/mcp-servers
+      cd /home/ubuntu/mcp-servers
       git clone https://github.com/ac3xx/web-search-mcp.git
       cd web-search-mcp
       npm install
@@ -81,11 +81,11 @@ mcp_servers:
     type: cloud-free
     command: node
     args:
-      - "/home/user/mcp-servers/nws-mcp-server/dist/index.js"
+      - "/home/ubuntu/mcp-servers/nws-mcp-server/dist/index.js"
     description: "Weather data from US National Weather Service (no API key!)"
     privacy: "Free US government API, no tracking or API keys"
     installation: |
-      cd /home/user/mcp-servers
+      cd /home/ubuntu/mcp-servers
       git clone https://github.com/danhilse/nws-mcp-server.git
       cd nws-mcp-server
       npm install
