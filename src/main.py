@@ -21,6 +21,7 @@ from src.core.base_service import BaseService, ServiceError
 from src.core.config import config
 from src.services.llm.llm_engine import LLMEngine
 from src.services.mcp_gateway import MCPGateway
+from src.services.gui import GUIService
 
 
 class FreyaOrchestrator:
@@ -98,6 +99,16 @@ class FreyaOrchestrator:
             await llm_engine.initialize()
             self.services.append(llm_engine)
             logger.success("  ✓ LLM Engine initialized")
+
+            # Phase 1.75: GUI Service
+            if config.gui_enabled:
+                logger.info("  - Initializing GUI Service...")
+                gui_service = GUIService(self.message_bus)
+                await gui_service.initialize()
+                self.services.append(gui_service)
+                logger.success("  ✓ GUI Service initialized")
+            else:
+                logger.warning("  ⚠️  GUI Service disabled in configuration")
 
             # TODO Phase 2: Add Audio, STT, TTS services
             # logger.info("  - Initializing Audio Manager...")

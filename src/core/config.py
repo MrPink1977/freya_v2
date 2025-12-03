@@ -11,7 +11,7 @@ Date: 2025-12-03
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator, HttpUrl
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 from pathlib import Path
 
 
@@ -194,22 +194,12 @@ class FreyaConfig(BaseSettings):
     )
     
     # ==================== GUI Configuration ====================
-    gui_backend_host: str = Field(
-        default="0.0.0.0",
-        description="GUI backend host"
-    )
-    
-    gui_backend_port: int = Field(
-        default=8080,
-        ge=1,
-        le=65535,
-        description="GUI backend port"
-    )
-    
-    gui_enable_cors: bool = Field(
-        default=True,
-        description="Enable CORS for GUI backend"
-    )
+    gui_enabled: bool = True
+    gui_host: str = "0.0.0.0"
+    gui_port: int = 8000
+    gui_cors_origins: List[str] = ["http://localhost:5173", "http://localhost:8000"]
+    gui_websocket_heartbeat: int = 30
+    gui_log_retention: int = 1000
 
     # ==================== MCP Configuration ====================
     mcp_enabled: bool = Field(
