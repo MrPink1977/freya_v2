@@ -38,7 +38,18 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y portaudio19-dev ffmpeg libsndfile1
+        sudo apt-get install -y \
+          portaudio19-dev \
+          libsndfile1 \
+          ffmpeg \
+          libavcodec-dev \
+          libavformat-dev \
+          libavutil-dev \
+          libavfilter-dev \
+          libavdevice-dev \
+          libswscale-dev \
+          libswresample-dev \
+          pkg-config
   
     - name: Install Python dependencies
       run: |
