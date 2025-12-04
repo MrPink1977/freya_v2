@@ -15,7 +15,7 @@ from pathlib import Path
 import asyncio
 import uuid
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -26,6 +26,8 @@ from src.core.base_service import BaseService, ServiceError
 from src.core.message_bus import MessageBus
 from src.core.config import config
 from src.services.gui.websocket_manager import WebSocketManager
+from src.services.gui.auth import TokenManager, SessionManager
+from src.services.gui.rate_limiter import CompositeRateLimiter
 from src.services.gui.models import (
     SystemStatus,
     ServiceStatus,
@@ -86,6 +88,22 @@ class GUIService(BaseService):
 
         # WebSocket manager
         self.ws_manager = WebSocketManager()
+        
+        # Security components
+        self.token_manager = TokenManager(
+            secret_key=config.gui_jwt_secret,
+            token_expiry=config.gui_token_expiry
+        )
+        self.session_manager = SessionManager(
+            max_sessions=config.gui_max_sessions,
+            session_timeout=config.gui_session_timeout
+        )
+        self.rate_limiter = CompositeRateLimiter(
+            ip_rate=config.gui_rate_limit_rate * 2,  # More lenient per-IP
+            ip_burst=config.gui_rate_limit_burst * 2,
+            session_rate=config.gui_rate_limit_rate,
+            session_burst=config.gui_rate_limit_burst
+        )
 
         # Data caches
         self.service_statuses: Dict[str, Dict[str, Any]] = {}
@@ -100,7 +118,7 @@ class GUIService(BaseService):
         self._setup_middleware()
         self._setup_routes()
 
-        logger.debug(f"[{self.name}] Initialized GUI Service")
+        logger.debug(f"[{self.name}] Initialized GUI Service with security enabled")
 
     def _setup_middleware(self) -> None:
         """Configure CORS and other middleware."""
@@ -121,6 +139,74 @@ class GUIService(BaseService):
         async def health_check():
             """Health check endpoint."""
             return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+        
+        # Authentication endpoints
+        @self.app.post("/api/auth/token")
+        async def create_token(request: Request):
+            """
+            Create an authentication token for WebSocket connection.
+            
+            Returns a JWT token and session information.
+            """
+            try:
+                # Get client information
+                client_ip = request.client.host if request.client else "unknown"
+                user_agent = request.headers.get("user-agent", "unknown")
+                
+                # Create session
+                session_id = self.session_manager.create_session(
+                    client_ip=client_ip,
+                    user_agent=user_agent
+                )
+                
+                # Generate token
+                token = self.token_manager.generate_token(
+                    session_id=session_id,
+                    client_info={"ip": client_ip, "user_agent": user_agent}
+                )
+                
+                logger.info(f"[{self.name}] Created auth token for {client_ip}")
+                
+                return APIResponse(
+                    success=True,
+                    data={
+                        "token": token,
+                        "session_id": session_id,
+                        "expires_in": config.gui_token_expiry
+                    },
+                    timestamp=datetime.now().isoformat()
+                )
+                
+            except RuntimeError as e:
+                logger.error(f"[{self.name}] Failed to create token: {e}")
+                raise HTTPException(status_code=503, detail=str(e))
+            except Exception as e:
+                logger.error(f"[{self.name}] Error creating token: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+        
+        @self.app.post("/api/auth/refresh")
+        async def refresh_token(request: Request, token: str = Query(...)):
+            """Refresh an existing authentication token."""
+            try:
+                new_token = self.token_manager.refresh_token(token)
+                
+                if not new_token:
+                    raise HTTPException(status_code=401, detail="Invalid or expired token")
+                
+                return APIResponse(
+                    success=True,
+                    data={
+                        "token": new_token,
+                        "expires_in": config.gui_token_expiry
+                    },
+                    timestamp=datetime.now().isoformat()
+                )
+                
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"[{self.name}] Error refreshing token: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
 
         # System status endpoint
         @self.app.get("/api/status")
@@ -237,10 +323,49 @@ class GUIService(BaseService):
 
         # WebSocket endpoint for real-time updates
         @self.app.websocket("/ws")
-        async def websocket_endpoint(websocket: WebSocket):
-            """WebSocket endpoint for real-time dashboard updates."""
-            await self.ws_manager.connect(websocket)
+        async def websocket_endpoint(
+            websocket: WebSocket,
+            token: Optional[str] = Query(None)
+        ):
+            """
+            WebSocket endpoint for real-time dashboard updates.
+            
+            Requires authentication via JWT token passed as query parameter.
+            Example: ws://localhost:8000/ws?token=<jwt_token>
+            """
+            client_ip = websocket.client.host if websocket.client else "unknown"
+            session_id = None
+            
             try:
+                # Validate token
+                if not token:
+                    logger.warning(f"[{self.name}] WebSocket connection rejected: no token from {client_ip}")
+                    await websocket.close(code=1008, reason="Authentication required")
+                    return
+                
+                payload = self.token_manager.validate_token(token)
+                if not payload:
+                    logger.warning(f"[{self.name}] WebSocket connection rejected: invalid token from {client_ip}")
+                    await websocket.close(code=1008, reason="Invalid or expired token")
+                    return
+                
+                session_id = payload.get("session_id")
+                if not session_id:
+                    logger.warning(f"[{self.name}] WebSocket connection rejected: no session_id from {client_ip}")
+                    await websocket.close(code=1008, reason="Invalid token payload")
+                    return
+                
+                # Verify session exists
+                session = self.session_manager.get_session(session_id)
+                if not session:
+                    logger.warning(f"[{self.name}] WebSocket connection rejected: session not found from {client_ip}")
+                    await websocket.close(code=1008, reason="Session not found or expired")
+                    return
+                
+                # Accept connection
+                await self.ws_manager.connect(websocket)
+                logger.info(f"[{self.name}] WebSocket client connected: {session_id} from {client_ip}")
+                
                 # Send initial state
                 await websocket.send_json({
                     "type": "initial_state",
@@ -255,15 +380,36 @@ class GUIService(BaseService):
                 # Keep connection alive and handle incoming messages
                 while True:
                     data = await websocket.receive_text()
-                    # Handle any client messages if needed
-                    logger.debug(f"[{self.name}] Received WebSocket message: {data}")
+                    
+                    # Update session activity
+                    self.session_manager.update_activity(session_id)
+                    
+                    # Check rate limit
+                    if not self.rate_limiter.check_rate_limit(client_ip, session_id):
+                        logger.warning(f"[{self.name}] Rate limit exceeded for {session_id}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": "Rate limit exceeded. Please slow down.",
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        continue
+                    
+                    # Handle client messages
+                    logger.debug(f"[{self.name}] Received WebSocket message from {session_id}: {data[:100]}")
 
             except WebSocketDisconnect:
                 self.ws_manager.disconnect(websocket)
-                logger.info(f"[{self.name}] WebSocket client disconnected")
+                if session_id:
+                    logger.info(f"[{self.name}] WebSocket client disconnected: {session_id}")
+                else:
+                    logger.info(f"[{self.name}] WebSocket client disconnected from {client_ip}")
             except Exception as e:
                 logger.error(f"[{self.name}] WebSocket error: {e}")
                 self.ws_manager.disconnect(websocket)
+                if session_id:
+                    # Optionally remove the session on error
+                    # self.session_manager.remove_session(session_id)
+                    pass
 
         # Serve static frontend files in production
         frontend_dist = Path(__file__).parent.parent.parent.parent / "src" / "gui" / "frontend" / "dist"
@@ -292,9 +438,13 @@ class GUIService(BaseService):
 
             # Start WebSocket broadcast loop
             await self.ws_manager.start_broadcasting()
+            
+            # Start cleanup tasks for session and rate limiting
+            await self.session_manager.start_cleanup_task()
+            await self.rate_limiter.start_cleanup_task()
 
             self._healthy = True
-            logger.success(f"[{self.name}] ✓ GUI Service initialized")
+            logger.success(f"[{self.name}] ✓ GUI Service initialized with security")
 
         except Exception as e:
             logger.exception(f"[{self.name}] ❌ Initialization failed: {e}")
@@ -373,6 +523,10 @@ class GUIService(BaseService):
 
             # Stop WebSocket broadcast loop
             await self.ws_manager.stop_broadcasting()
+            
+            # Stop cleanup tasks
+            await self.session_manager.stop_cleanup_task()
+            await self.rate_limiter.stop_cleanup_task()
 
             # Shutdown FastAPI server
             if self._server:
