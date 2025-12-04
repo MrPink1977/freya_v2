@@ -214,6 +214,438 @@ When writing code, you MUST follow these standards:
    - Supporting files in same directory
    - __init__.py in every directory
 
+TESTING REQUIREMENTS:
+
+Every new service or feature MUST include comprehensive tests. Follow these guidelines:
+
+1. TEST STRUCTURE
+   - Unit tests in tests/unit/ for individual components
+   - Integration tests in tests/integration/ for multi-component interactions
+   - Shared fixtures in tests/conftest.py
+   - Mock utilities in tests/mocks/
+   - Use pytest markers: @pytest.mark.unit, @pytest.mark.integration, @pytest.mark.slow
+
+2. COVERAGE EXPECTATIONS
+   - Minimum: 70% coverage for new code
+   - Core modules: Aim for 85%+ coverage
+   - All public methods must be tested
+   - Test both success and failure paths
+   - Test edge cases and error conditions
+
+3. WRITING UNIT TESTS
+   Example:
+   ```python
+   import pytest
+   from unittest.mock import AsyncMock, MagicMock, patch
+   
+   @pytest.mark.unit
+   @pytest.mark.asyncio
+   async def test_service_initialization(mock_message_bus, mock_config):
+       """Test that MyService initializes correctly."""
+       service = MyService(mock_message_bus)
+       await service.initialize()
+       
+       assert service._healthy is True
+       assert service.name == "my_service"
+       mock_message_bus.subscribe.assert_called_once()
+   
+   @pytest.mark.unit
+   @pytest.mark.asyncio
+   async def test_error_handling(mock_message_bus):
+       """Test that service handles errors gracefully."""
+       service = MyService(mock_message_bus)
+       
+       # Simulate error
+       mock_message_bus.publish.side_effect = Exception("Connection error")
+       
+       with pytest.raises(MyServiceError) as exc_info:
+           await service._process_data({})
+       
+       assert "Connection error" in str(exc_info.value)
+       assert service._error_count > 0
+   ```
+
+4. WRITING INTEGRATION TESTS
+   Example:
+   ```python
+   @pytest.mark.integration
+   @pytest.mark.asyncio
+   async def test_full_pipeline(mock_message_bus, mock_whisper, mock_ollama, mock_mcp_gateway):
+       """Test complete audio pipeline: STT -> LLM -> TTS."""
+       # Setup services
+       stt = STTService(mock_message_bus)
+       llm = LLMEngine(mock_message_bus)
+       tts = TTSService(mock_message_bus)
+       
+       await stt.initialize()
+       await llm.initialize()
+       await tts.initialize()
+       
+       # Simulate audio input
+       audio_data = generate_test_audio()
+       await mock_message_bus.publish("audio.input.stream", {"audio": audio_data})
+       
+       # Wait for pipeline to complete
+       await asyncio.sleep(0.1)
+       
+       # Verify message flow
+       assert mock_message_bus.publish.call_count >= 3
+       # Verify STT published transcription
+       # Verify LLM published response
+       # Verify TTS published audio
+   ```
+
+5. MOCKING STRATEGIES
+   - Mock external dependencies (Redis, Ollama, PyAudio, ElevenLabs)
+   - Use shared fixtures from conftest.py
+   - Create realistic mock responses
+   - Example mock fixtures:
+     * mock_message_bus: Mocked MessageBus
+     * mock_redis: Mocked aioredis client
+     * mock_ollama: Mocked Ollama client
+     * mock_pyaudio: Mocked PyAudio instance
+     * mock_mcp_gateway: Mocked MCP Gateway
+     * sample_audio_data: Synthetic audio for testing
+
+6. ASYNC TESTING
+   - Always use @pytest.mark.asyncio for async tests
+   - Use await for async operations
+   - Use asyncio.sleep() for timing-dependent tests
+   - Use asyncio.gather() for concurrent operations
+   - Example:
+   ```python
+   @pytest.mark.asyncio
+   async def test_concurrent_requests():
+       # Create multiple tasks
+       tasks = [service.process(data) for data in test_data]
+       # Run concurrently
+       results = await asyncio.gather(*tasks)
+       # Verify all succeeded
+       assert all(r.success for r in results)
+   ```
+
+7. RUNNING TESTS
+   ```bash
+   # All tests with coverage
+   pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=html
+   
+   # Unit tests only
+   pytest tests/unit/ -v
+   
+   # Integration tests only
+   pytest tests/integration/ -v
+   
+   # Specific test
+   pytest tests/unit/test_my_service.py::test_initialization -v
+   
+   # With markers
+   pytest -m unit -v
+   pytest -m "not slow" -v
+   ```
+
+8. TEST DOCUMENTATION
+   - Every test needs a clear docstring
+   - Explain what is being tested and why
+   - Document any complex setup or mocking
+   - Reference TESTING.md for comprehensive guide
+
+SECURITY BEST PRACTICES:
+
+When implementing security features, follow these patterns from Phase 2:
+
+1. JWT AUTHENTICATION
+   ```python
+   from datetime import datetime, timedelta
+   import jwt
+   
+   class TokenManager:
+       def __init__(self, secret_key: str, token_expiry: int):
+           self.secret_key = secret_key
+           self.token_expiry = token_expiry
+       
+       def generate_token(self, session_id: str) -> str:
+           """Generate JWT token for session."""
+           payload = {
+               "session_id": session_id,
+               "exp": datetime.utcnow() + timedelta(seconds=self.token_expiry),
+               "iat": datetime.utcnow()
+           }
+           return jwt.encode(payload, self.secret_key, algorithm="HS256")
+       
+       def validate_token(self, token: str) -> Optional[str]:
+           """Validate JWT and return session_id."""
+           try:
+               payload = jwt.decode(token, self.secret_key, algorithms=["HS256"])
+               return payload.get("session_id")
+           except jwt.ExpiredSignatureError:
+               logger.warning("Token expired")
+               return None
+           except jwt.InvalidTokenError:
+               logger.warning("Invalid token")
+               return None
+   ```
+
+2. RATE LIMITING (Sliding Window)
+   ```python
+   from collections import deque
+   from datetime import datetime, timedelta
+   
+   class RateLimiter:
+       def __init__(self, rate: float, burst: int):
+           self.rate = rate  # requests per second
+           self.burst = burst  # maximum burst size
+           self.requests: Dict[str, deque] = {}
+       
+       async def check_limit(self, key: str) -> bool:
+           """Check if request is within rate limit."""
+           now = datetime.now()
+           
+           if key not in self.requests:
+               self.requests[key] = deque()
+           
+           # Remove old requests outside window
+           window_start = now - timedelta(seconds=1)
+           while self.requests[key] and self.requests[key][0] < window_start:
+               self.requests[key].popleft()
+           
+           # Check if at limit
+           if len(self.requests[key]) >= self.burst:
+               return False
+           
+           # Add current request
+           self.requests[key].append(now)
+           return True
+   ```
+
+3. SESSION MANAGEMENT
+   ```python
+   class SessionManager:
+       def __init__(self, session_timeout: int, max_sessions: int):
+           self.sessions: Dict[str, SessionInfo] = {}
+           self.session_timeout = session_timeout
+           self.max_sessions = max_sessions
+       
+       def create_session(self, client_ip: str, user_agent: str) -> str:
+           """Create new session, enforce max sessions."""
+           if len(self.sessions) >= self.max_sessions:
+               # Clean up expired sessions
+               self.cleanup_expired_sessions()
+               
+               if len(self.sessions) >= self.max_sessions:
+                   raise TooManySessionsError()
+           
+           session_id = str(uuid.uuid4())
+           self.sessions[session_id] = SessionInfo(
+               session_id=session_id,
+               created_at=datetime.now(),
+               last_activity=datetime.now(),
+               client_ip=client_ip,
+               user_agent=user_agent
+           )
+           return session_id
+   ```
+
+4. WEBSOCKET SECURITY
+   ```python
+   @app.websocket("/ws")
+   async def websocket_endpoint(
+       websocket: WebSocket,
+       token: str = Query(...),
+       request: Request = None
+   ):
+       # Validate JWT token
+       session_id = token_manager.validate_token(token)
+       if not session_id:
+           await websocket.close(code=1008, reason="Invalid token")
+           return
+       
+       # Check rate limit
+       client_ip = request.client.host
+       if not await rate_limiter.check_limit(client_ip):
+           await websocket.close(code=1008, reason="Rate limit exceeded")
+           return
+       
+       # Accept connection
+       await websocket.accept()
+       
+       try:
+           while True:
+               data = await websocket.receive_json()
+               
+               # Check per-session rate limit
+               if not await rate_limiter.check_limit(session_id):
+                   await websocket.send_json({"error": "Rate limit exceeded"})
+                   continue
+               
+               # Process message
+               await handle_message(data)
+               
+       except WebSocketDisconnect:
+           session_manager.remove_session(session_id)
+   ```
+
+PHASE 2 IMPLEMENTATION PATTERNS:
+
+Use these patterns from Phase 2 as reference for new services:
+
+1. AUDIO SERVICE PATTERN (TTS Service)
+   ```python
+   class TTSService(BaseService):
+       def __init__(self, message_bus: MessageBus) -> None:
+           super().__init__("tts_service", message_bus)
+           self.generation_count = 0
+           self.total_characters = 0
+       
+       async def initialize(self) -> None:
+           """Initialize service and check dependencies."""
+           if not config.elevenlabs_api_key:
+               raise TTSServiceError("ElevenLabs API key not configured")
+           self._healthy = True
+       
+       async def start(self) -> None:
+           """Start service and subscribe to channels."""
+           self._mark_started()
+           await self.message_bus.subscribe("llm.final_response", self._handle_llm_response)
+           await self.message_bus.subscribe("tts.generate", self._handle_tts_request)
+           await self.publish_status("started")
+       
+       async def _handle_llm_response(self, data: Dict[str, Any]) -> None:
+           """Process LLM response and generate speech."""
+           text = data.get("text", "")
+           if len(text) < 5:  # Skip very short responses
+               return
+           
+           try:
+               audio = await self._generate_speech(text)
+               await self.message_bus.publish("audio.output.stream", {
+                   "audio": audio,
+                   "format": "mp3",
+                   "timestamp": datetime.now().isoformat()
+               })
+           except Exception as e:
+               logger.error(f"[{self.name}] ❌ Speech generation failed: {e}")
+               self.increment_error_count()
+   ```
+
+2. MCP GATEWAY INTEGRATION
+   ```python
+   async def _call_mcp_tool(self, server: str, tool: str, arguments: Dict[str, Any]) -> Any:
+       """Call MCP tool via gateway and wait for result."""
+       request_id = str(uuid.uuid4())
+       result_channel = f"mcp.tool.result.{request_id}"
+       
+       # Subscribe to result channel
+       result = asyncio.Future()
+       
+       async def handle_result(data: Dict[str, Any]):
+           if not result.done():
+               result.set_result(data)
+       
+       await self.message_bus.subscribe(result_channel, handle_result)
+       
+       try:
+           # Publish tool execution request
+           await self.message_bus.publish("mcp.tool.execute", {
+               "request_id": request_id,
+               "server": server,
+               "tool": tool,
+               "arguments": arguments,
+               "result_channel": result_channel
+           })
+           
+           # Wait for result with timeout
+           return await asyncio.wait_for(result, timeout=30.0)
+           
+       finally:
+           await self.message_bus.unsubscribe(result_channel)
+   ```
+
+3. AUDIO I/O WITH THREADING
+   ```python
+   class AudioManager(BaseService):
+       def __init__(self, message_bus: MessageBus) -> None:
+           super().__init__("audio_manager", message_bus)
+           self.pyaudio = None
+           self.input_stream = None
+           self.output_stream = None
+           self.input_thread = None
+           self.output_thread = None
+           self.input_queue = queue.Queue(maxsize=100)
+           self.output_queue = queue.Queue(maxsize=100)
+           self._input_running = False
+           self._output_running = False
+       
+       def _input_loop(self):
+           """Input thread loop - reads from mic and publishes to message bus."""
+           while self._input_running:
+               try:
+                   data = self.input_stream.read(config.audio_chunk_size, exception_on_overflow=False)
+                   self.input_queue.put(data, block=False)
+                   
+                   # Async publish from thread
+                   asyncio.run_coroutine_threadsafe(
+                       self._publish_audio(data),
+                       self._event_loop
+                   )
+               except queue.Full:
+                   logger.warning(f"[{self.name}] Input queue full, dropping frame")
+               except Exception as e:
+                   logger.error(f"[{self.name}] Input error: {e}")
+       
+       def _output_loop(self):
+           """Output thread loop - reads from queue and plays to speaker."""
+           while self._output_running:
+               try:
+                   data = self.output_queue.get(timeout=0.1)
+                   self.output_stream.write(data)
+               except queue.Empty:
+                   continue
+               except Exception as e:
+                   logger.error(f"[{self.name}] Output error: {e}")
+   ```
+
+4. COMPREHENSIVE FIXTURE SETUP (conftest.py)
+   ```python
+   @pytest.fixture
+   def mock_message_bus():
+       """Mock MessageBus with realistic pub/sub behavior."""
+       bus = AsyncMock(spec=MessageBus)
+       subscriptions = {}
+       
+       async def mock_publish(channel, data):
+           # Trigger subscribed callbacks
+           if channel in subscriptions:
+               for callback in subscriptions[channel]:
+                   await callback(data)
+       
+       async def mock_subscribe(channel, callback):
+           if channel not in subscriptions:
+               subscriptions[channel] = []
+           subscriptions[channel].append(callback)
+       
+       bus.publish.side_effect = mock_publish
+       bus.subscribe.side_effect = mock_subscribe
+       
+       return bus
+   ```
+
+CODE QUALITY CHECKLIST:
+
+Before committing, verify:
+- [ ] All functions have type hints
+- [ ] All public methods have docstrings
+- [ ] Error handling with custom exceptions
+- [ ] Logging at appropriate levels with emojis
+- [ ] Tests written (unit + integration if applicable)
+- [ ] Test coverage ≥70% for new code
+- [ ] All tests passing locally
+- [ ] No hardcoded secrets or API keys
+- [ ] Configuration via environment variables
+- [ ] Health checks implemented for services
+- [ ] Metrics tracking for important operations
+- [ ] Graceful shutdown with cleanup
+- [ ] Documentation updated (README, DEVELOPMENT_LOG, etc.)
+
 AFTER IMPLEMENTATION:
 
 1. UPDATE DEVELOPMENT_LOG.md
@@ -257,13 +689,35 @@ Phase 1 (Foundation): ✅ COMPLETE
 - Docker Compose setup
 - All code enhanced to production quality
 
-Phase 2 (Multi-room Audio): ⏳ NEXT
-- Audio Manager for device management
-- STT Service with faster-whisper
-- TTS Service with ElevenLabs
-- Multi-room coordination
+Phase 1.5 (MCP Gateway): ✅ COMPLETE
+- MCP Gateway service operational
+- 6 MCP servers connected (filesystem, web-search, weather, shell, time, calculator)
+- Tool calling integrated in LLM Engine
+- Zero API keys for local tools
 
-Phase 3-6: See ROADMAP.md for details
+Phase 1.75 (GUI Dashboard): ✅ COMPLETE
+- FastAPI backend with WebSocket support
+- React frontend with real-time updates
+- Service status monitoring
+- Text chat interface
+- Tool call visualization
+
+Phase 2 (Audio Pipeline & Backend Infrastructure): ✅ COMPLETE
+- Testing framework (pytest, pytest-asyncio, pytest-cov)
+- WebSocket security (JWT auth, rate limiting)
+- TTS Service with ElevenLabs via MCP
+- Audio Manager with PyAudio
+- Integration tests for audio pipeline
+- CI/CD pipeline with GitHub Actions
+- 43+ tests, 70% coverage
+
+Phase 3 (Multi-Room & Location Awareness): ⏳ NEXT
+- Multi-room audio coordination
+- Location awareness
+- Wake word detection
+- Conversation windowing
+
+Phase 4-6: See ROADMAP.md for details
 
 Now, please:
 1. Assess the current repository state
