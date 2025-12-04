@@ -22,6 +22,8 @@ from src.core.config import config
 from src.services.llm.llm_engine import LLMEngine
 from src.services.mcp_gateway import MCPGateway
 from src.services.gui import GUIService
+from src.services.tts import TTSService
+from src.services.audio import AudioManager
 
 
 class FreyaOrchestrator:
@@ -110,21 +112,20 @@ class FreyaOrchestrator:
             else:
                 logger.warning("  ⚠️  GUI Service disabled in configuration")
 
-            # TODO Phase 2: Add Audio, STT, TTS services
-            # logger.info("  - Initializing Audio Manager...")
-            # audio_manager = AudioManager(self.message_bus)
-            # await audio_manager.initialize()
-            # self.services.append(audio_manager)
+            # Phase 2: Audio Services
+            logger.info("  - Initializing TTS Service...")
+            tts_service = TTSService(self.message_bus)
+            await tts_service.initialize()
+            self.services.append(tts_service)
+            logger.success("  ✓ TTS Service initialized")
             
-            # logger.info("  - Initializing STT Service...")
-            # stt_service = STTService(self.message_bus)
-            # await stt_service.initialize()
-            # self.services.append(stt_service)
+            logger.info("  - Initializing Audio Manager...")
+            audio_manager = AudioManager(self.message_bus)
+            await audio_manager.initialize()
+            self.services.append(audio_manager)
+            logger.success("  ✓ Audio Manager initialized")
             
-            # logger.info("  - Initializing TTS Service...")
-            # tts_service = TTSService(self.message_bus)
-            # await tts_service.initialize()
-            # self.services.append(tts_service)
+            # Note: STT Service already initialized separately if enabled
             
             # TODO Phase 4: Add Memory Manager
             # logger.info("  - Initializing Memory Manager...")
