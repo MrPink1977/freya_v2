@@ -200,6 +200,42 @@ class FreyaConfig(BaseSettings):
     gui_cors_origins: List[str] = ["http://localhost:5173", "http://localhost:8000"]
     gui_websocket_heartbeat: int = 30
     gui_log_retention: int = 1000
+    
+    # GUI Security
+    gui_jwt_secret: str = Field(
+        default="change-this-secret-in-production",
+        description="JWT secret key for WebSocket authentication"
+    )
+    gui_token_expiry: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description="JWT token expiration time in seconds (default: 1 hour)"
+    )
+    gui_session_timeout: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description="Session timeout in seconds (default: 1 hour)"
+    )
+    gui_max_sessions: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Maximum concurrent WebSocket sessions"
+    )
+    gui_rate_limit_rate: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=100.0,
+        description="Rate limit requests per second per session"
+    )
+    gui_rate_limit_burst: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        description="Rate limit burst size"
+    )
 
     # ==================== MCP Configuration ====================
     mcp_enabled: bool = Field(

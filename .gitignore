@@ -63,3 +63,13 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Generated documentation
+*.pdf
+
+# Test coverage reports
+coverage.xml
+htmlcov/
+
+# Abacus internal files
+.abacus.donotdelete
