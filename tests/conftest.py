@@ -55,13 +55,15 @@ def mock_redis():
     redis_mock.publish = AsyncMock(return_value=1)
     redis_mock.subscribe = AsyncMock()
     redis_mock.unsubscribe = AsyncMock()
-    redis_mock.close = AsyncMock()
+    redis_mock.close = AsyncMock(return_value=None)
+    redis_mock.aclose = AsyncMock(return_value=None)  # Some versions use aclose
     
     # Mock pubsub
     pubsub_mock = MagicMock()
     pubsub_mock.subscribe = AsyncMock()
     pubsub_mock.unsubscribe = AsyncMock()
     pubsub_mock.get_message = AsyncMock(return_value=None)
+    pubsub_mock.close = AsyncMock(return_value=None)
     redis_mock.pubsub = Mock(return_value=pubsub_mock)
     
     return redis_mock
@@ -397,6 +399,8 @@ def mock_config():
     
     # TTS
     config_mock.tts_voice_id = "test_voice"
+    config_mock.elevenlabs_voice_id = "test_voice"  # TTS Service uses this
+    config_mock.elevenlabs_model = "eleven_monolingual_v1"  # TTS Service uses this
     config_mock.tts_model = "eleven_monolingual_v1"
     config_mock.tts_stability = 0.5
     config_mock.tts_similarity_boost = 0.5
