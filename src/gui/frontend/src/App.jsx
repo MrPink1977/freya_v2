@@ -3,6 +3,7 @@ import ServiceMetrics from './components/ServiceMetrics'
 import DebugPanel from './components/DebugPanel'
 import AudioTester from './components/AudioTester'
 import TestRunner from './components/TestRunner'
+import ErrorBoundary from './components/ErrorBoundary'
 
 const API_URL = 'http://localhost:8000'
 const WS_URL = 'ws://localhost:8000/ws'
@@ -265,9 +266,11 @@ function App() {
       </header>
 
       <main className="main-content">
-        <div className="tab-content">
-          {renderTabContent()}
-        </div>
+        <ErrorBoundary>
+          <div className="tab-content">
+            {renderTabContent()}
+          </div>
+        </ErrorBoundary>
       </main>
 
       {/* Connection Status Indicator */}
