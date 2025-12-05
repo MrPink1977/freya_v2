@@ -97,10 +97,14 @@ class FreyaOrchestrator:
 
             # Phase 1: LLM Engine
             logger.info("  - Initializing LLM Engine...")
-            llm_engine = LLMEngine(self.message_bus)
-            await llm_engine.initialize()
-            self.services.append(llm_engine)
-            logger.success("  ✓ LLM Engine initialized")
+            try:
+                llm_engine = LLMEngine(self.message_bus)
+                await llm_engine.initialize()
+                self.services.append(llm_engine)
+                logger.success("  ✓ LLM Engine initialized")
+            except Exception as e:
+                logger.warning(f"  ⚠️  LLM Engine failed to initialize: {e}")
+                logger.warning("  ⚠️  Continuing without LLM Engine...")
 
             # Phase 1.75: GUI Service
             if config.gui_enabled:
@@ -114,16 +118,24 @@ class FreyaOrchestrator:
 
             # Phase 2: Audio Services
             logger.info("  - Initializing TTS Service...")
-            tts_service = TTSService(self.message_bus)
-            await tts_service.initialize()
-            self.services.append(tts_service)
-            logger.success("  ✓ TTS Service initialized")
-            
+            try:
+                tts_service = TTSService(self.message_bus)
+                await tts_service.initialize()
+                self.services.append(tts_service)
+                logger.success("  ✓ TTS Service initialized")
+            except Exception as e:
+                logger.warning(f"  ⚠️  TTS Service failed to initialize: {e}")
+                logger.warning("  ⚠️  Continuing without TTS Service...")
+
             logger.info("  - Initializing Audio Manager...")
-            audio_manager = AudioManager(self.message_bus)
-            await audio_manager.initialize()
-            self.services.append(audio_manager)
-            logger.success("  ✓ Audio Manager initialized")
+            try:
+                audio_manager = AudioManager(self.message_bus)
+                await audio_manager.initialize()
+                self.services.append(audio_manager)
+                logger.success("  ✓ Audio Manager initialized")
+            except Exception as e:
+                logger.warning(f"  ⚠️  Audio Manager failed to initialize: {e}")
+                logger.warning("  ⚠️  Continuing without Audio Manager...")
             
             # Note: STT Service already initialized separately if enabled
             
