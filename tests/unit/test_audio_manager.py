@@ -6,24 +6,40 @@ Tests audio I/O management with mocked PyAudio.
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
+
+# Check if PyAudio is available
+try:
+    import pyaudio
+    PYAUDIO_AVAILABLE = True
+except ImportError:
+    PYAUDIO_AVAILABLE = False
+
 from src.services.audio.audio_manager import AudioManager, AudioManagerError
 
 
+# Skip all tests in this class if PyAudio is not available
+@pytest.mark.skipif(not PYAUDIO_AVAILABLE, reason="PyAudio not installed - these tests require real PyAudio module for proper mocking")
 class TestAudioManager:
     """Test suite for AudioManager class."""
-    
+
     @pytest.fixture
     async def audio_manager(self, mock_message_bus, mock_config, mock_pyaudio):
         """Create an AudioManager instance with mocked PyAudio."""
-        with patch('src.services.audio.audio_manager.pyaudio.PyAudio', return_value=mock_pyaudio):
+        with patch('src.services.audio.audio_manager.pyaudio') as mock_pa:
+            mock_pa.PyAudio = MagicMock(return_value=mock_pyaudio)
+            mock_pa.paInt16 = 8
+            mock_pa.paContinue = 0
+
             with patch('src.services.audio.audio_manager.np') as mock_np:
                 mock_np.zeros.return_value.tobytes.return_value = b'\\x00\\x00' * 1024
+                mock_np.frombuffer = MagicMock()
+
                 with patch('src.services.audio.audio_manager.config', mock_config):
                     service = AudioManager(mock_message_bus)
                     yield service
                     if service._running:
                         await service.stop()
-    
+
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_initialization(self, mock_message_bus, mock_config):
@@ -32,13 +48,13 @@ class TestAudioManager:
             with patch('src.services.audio.audio_manager.np'):
                 with patch('src.services.audio.audio_manager.config', mock_config):
                     service = AudioManager(mock_message_bus)
-                    
+
                     assert service.name == "audio_manager"
                     assert service.sample_rate == mock_config.audio_sample_rate
                     assert service.channels == mock_config.audio_channels
                     assert not service.is_recording
                     assert not service.is_playing
-    
+
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_initialize(self, audio_manager, mock_pyaudio):

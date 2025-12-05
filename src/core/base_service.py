@@ -138,12 +138,21 @@ class BaseService(ABC):
     async def health_check(self) -> bool:
         """
         Check if the service is healthy.
-        
+
+        A service is considered healthy if:
+        - It has been initialized (_healthy=True)
+        - It has no recent critical errors (error count < threshold)
+
+        Note:
+            A service can be healthy but not running (e.g., between init and start).
+            Use is_running() to check if service is actively processing.
+            Use is_healthy_and_running() to check both conditions.
+
         Override this method to implement custom health checks.
-        
+
         Returns:
             True if the service is operational, False otherwise
-            
+
         Example:
             >>> async def health_check(self) -> bool:
             ...     if not await super().health_check():
@@ -151,25 +160,41 @@ class BaseService(ABC):
             ...     # Custom checks
             ...     return self.model_loaded and self.connection_active
         """
-        return self._healthy and self._running
-        
+        if not self._healthy:
+            return False
+
+        # Check error rate - unhealthy if too many errors
+        if self._error_count > 10:  # Configurable threshold
+            return False
+
+        return True
+
     def is_running(self) -> bool:
         """
         Check if the service is currently running.
-        
+
         Returns:
             True if running, False otherwise
         """
         return self._running
-        
+
     def is_healthy(self) -> bool:
         """
         Check if the service is healthy.
-        
+
         Returns:
             True if healthy, False otherwise
         """
         return self._healthy
+
+    def is_healthy_and_running(self) -> bool:
+        """
+        Check if service is both healthy and running.
+
+        Returns:
+            True if healthy AND running, False otherwise
+        """
+        return self._healthy and self._running
         
     def get_uptime(self) -> Optional[float]:
         """
@@ -252,19 +277,19 @@ class BaseService(ABC):
             # Don't raise - status publishing should not break the service
             
     async def publish_metric(
-        self, 
-        metric_name: str, 
-        value: Any, 
+        self,
+        metric_name: str,
+        value: Any,
         unit: Optional[str] = None
     ) -> None:
         """
         Publish a service metric to the message bus.
-        
+
         Args:
             metric_name: Name of the metric (e.g., "response_time", "requests_processed")
             value: Metric value
             unit: Optional unit (e.g., "ms", "count", "bytes")
-            
+
         Example:
             >>> await self.publish_metric("inference_time", 1.23, "seconds")
         """
@@ -275,15 +300,49 @@ class BaseService(ABC):
                 "value": value,
                 "timestamp": datetime.now().isoformat(),
             }
-            
+
             if unit:
                 message["unit"] = unit
-                
+
             await self.message_bus.publish(f"service.{self.name}.metrics", message)
             logger.debug(f"[{self.name}] Metric: {metric_name}={value}{unit or ''}")
-            
+
         except Exception as e:
             logger.error(f"[{self.name}] Failed to publish metric: {e}")
+
+    async def publish_metrics(self, metrics: Dict[str, Any]) -> None:
+        """
+        Publish multiple service metrics to the message bus.
+
+        Publishes a dictionary of metrics in a single message, useful for
+        related metrics that should be reported together.
+
+        Args:
+            metrics: Dictionary of metric name -> value pairs
+
+        Example:
+            >>> await self.publish_metrics({
+            ...     "requests_processed": 42,
+            ...     "average_latency_ms": 123.45,
+            ...     "error_rate": 0.01
+            ... })
+        """
+        try:
+            message = {
+                "service": self.name,
+                "metrics": metrics,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            await self.message_bus.publish(f"service.{self.name}.metrics", message)
+
+            # Log metrics in a readable format
+            metrics_str = ", ".join(f"{k}={v}" for k, v in metrics.items())
+            logger.debug(f"[{self.name}] Published metrics: {metrics_str}")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Failed to publish metrics: {e}")
+            # Don't raise - metrics publishing should not break service
             
     def _mark_started(self) -> None:
         """Mark the service as started (internal use)."""
