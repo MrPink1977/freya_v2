@@ -294,6 +294,102 @@ class GUIService(BaseService):
                 logger.error(f"[{self.name}] Error getting debug messages: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
+        # Audio devices endpoint (Stub for Phase 2D)
+        @self.app.get("/api/audio/devices")
+        async def get_audio_devices():
+            """Get available audio devices (placeholder)."""
+            try:
+                # TODO: Wire to Audio Manager when ready
+                return {
+                    "input_devices": [
+                        {"index": 0, "name": "Default Microphone", "is_default": True},
+                        {"index": 1, "name": "USB Microphone", "is_default": False},
+                        {"index": 2, "name": "Webcam Microphone", "is_default": False}
+                    ],
+                    "output_devices": [
+                        {"index": 0, "name": "Default Speaker", "is_default": True},
+                        {"index": 1, "name": "Headphones", "is_default": False},
+                        {"index": 2, "name": "HDMI Audio", "is_default": False}
+                    ],
+                    "note": "Placeholder data - Audio Manager not yet wired"
+                }
+            except Exception as e:
+                logger.error(f"[{self.name}] Error getting audio devices: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        # TTS test endpoint (Stub for Phase 2D)
+        @self.app.post("/api/audio/test-tts")
+        async def test_tts(request: Dict[str, str]):
+            """Test TTS generation (placeholder)."""
+            try:
+                text = request.get("text", "")
+                if not text:
+                    raise HTTPException(status_code=400, detail="Text is required")
+
+                # TODO: Wire to TTS Service when ready
+                await asyncio.sleep(1)  # Simulate processing
+
+                return {
+                    "success": False,
+                    "message": "TTS testing coming soon!",
+                    "note": "Placeholder response - TTS Service not yet wired",
+                    "text": text
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"[{self.name}] Error testing TTS: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        # Test runner endpoint (Stub for Phase 2D)
+        @self.app.post("/api/tests/run")
+        async def run_tests(request: Dict[str, str]):
+            """Run test suite (placeholder)."""
+            try:
+                suite = request.get("suite", "all")
+
+                # TODO: Wire to actual pytest execution
+                # For now, return mock results from Phase 2 verification
+                await asyncio.sleep(2)  # Simulate test run
+
+                return {
+                    "status": "completed",
+                    "suite": suite,
+                    "results": {
+                        "total": 52,
+                        "passed": 43,
+                        "failed": 0,
+                        "skipped": 9,
+                        "duration": 3.8
+                    },
+                    "note": "Mock test results - real execution coming soon"
+                }
+            except Exception as e:
+                logger.error(f"[{self.name}] Error running tests: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        # Test coverage endpoint (Stub for Phase 2D)
+        @self.app.get("/api/tests/coverage")
+        async def get_coverage():
+            """Get test coverage data (placeholder)."""
+            try:
+                # TODO: Parse real coverage.xml
+                return {
+                    "overall": 15.62,
+                    "modules": [
+                        {"name": "src/core/base_service.py", "coverage": 78.16},
+                        {"name": "src/core/config.py", "coverage": 100.00},
+                        {"name": "src/services/tts/tts_service.py", "coverage": 61.54},
+                        {"name": "src/services/stt/stt_service.py", "coverage": 31.25},
+                        {"name": "src/services/audio/audio_manager.py", "coverage": 0.00},
+                        {"name": "src/core/message_bus.py", "coverage": 24.24}
+                    ],
+                    "note": "Placeholder coverage data from Phase 2"
+                }
+            except Exception as e:
+                logger.error(f"[{self.name}] Error getting coverage: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
         # Send user message endpoint
         @self.app.post("/api/message")
         async def send_message(message: Dict[str, str]):

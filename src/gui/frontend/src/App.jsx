@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import ServiceMetrics from './components/ServiceMetrics'
 import DebugPanel from './components/DebugPanel'
+import AudioTester from './components/AudioTester'
+import TestRunner from './components/TestRunner'
 
 const API_URL = 'http://localhost:8000'
 const WS_URL = 'ws://localhost:8000/ws'
@@ -340,12 +342,8 @@ function HomeTab({ services, messages, inputValue, setInputValue, sendMessage, w
 
 function AudioTab() {
   return (
-    <div className="placeholder-tab">
-      <div className="placeholder-content">
-        <h2>🎤 Audio Testing</h2>
-        <p>Audio device testing and TTS tools will be available here.</p>
-        <div className="placeholder-badge">Coming in Session 3</div>
-      </div>
+    <div className="audio-tab">
+      <AudioTester />
     </div>
   )
 }
@@ -360,12 +358,8 @@ function DebugTab() {
 
 function TestsTab() {
   return (
-    <div className="placeholder-tab">
-      <div className="placeholder-content">
-        <h2>🧪 Test Runner</h2>
-        <p>Run and view test results with coverage visualization.</p>
-        <div className="placeholder-badge">Coming in Session 3</div>
-      </div>
+    <div className="tests-tab">
+      <TestRunner />
     </div>
   )
 }
