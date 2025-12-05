@@ -4,13 +4,68 @@ const API_URL = 'http://localhost:8000'
 const WS_URL = 'ws://localhost:8000/ws'
 
 function App() {
+  // State
   const [services, setServices] = useState([])
   const [messages, setMessages] = useState([])
   const [tools, setTools] = useState([])
   const [inputValue, setInputValue] = useState('')
   const [wsConnected, setWsConnected] = useState(false)
+  const [activeTab, setActiveTab] = useState('home')
+  const [theme, setTheme] = useState('dark')
+
   const wsRef = useRef(null)
   const messagesEndRef = useRef(null)
+
+  // Theme toggle
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark')
+  }
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyboard = (e) => {
+      // Check if Ctrl/Cmd is pressed
+      if (e.ctrlKey || e.metaKey) {
+        switch(e.key) {
+          case '1':
+            e.preventDefault()
+            setActiveTab('home')
+            break
+          case '2':
+            e.preventDefault()
+            setActiveTab('audio')
+            break
+          case '3':
+            e.preventDefault()
+            setActiveTab('debug')
+            break
+          case '4':
+            e.preventDefault()
+            setActiveTab('tests')
+            break
+          case '5':
+            e.preventDefault()
+            setActiveTab('tools')
+            break
+          case 'd':
+            e.preventDefault()
+            setActiveTab('debug')
+            break
+          case 't':
+            e.preventDefault()
+            setActiveTab('tests')
+            break
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyboard)
+    return () => window.removeEventListener('keydown', handleKeyboard)
+  }, [])
 
   // WebSocket connection
   useEffect(() => {
@@ -35,7 +90,6 @@ function App() {
       ws.onclose = () => {
         console.log('WebSocket disconnected')
         setWsConnected(false)
-        // Attempt reconnection after 3 seconds
         setTimeout(connectWebSocket, 3000)
       }
 
@@ -130,110 +184,85 @@ function App() {
     }
   }
 
+  // Tab definitions
+  const tabs = [
+    { id: 'home', label: 'Home', shortcut: 'Ctrl+1' },
+    { id: 'audio', label: 'Audio', shortcut: 'Ctrl+2' },
+    { id: 'debug', label: 'Debug', shortcut: 'Ctrl+3' },
+    { id: 'tests', label: 'Tests', shortcut: 'Ctrl+4' },
+    { id: 'tools', label: 'Tools', shortcut: 'Ctrl+5' },
+  ]
+
+  // Render tab content
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'home':
+        return <HomeTab
+          services={services}
+          messages={messages}
+          inputValue={inputValue}
+          setInputValue={setInputValue}
+          sendMessage={sendMessage}
+          wsConnected={wsConnected}
+          messagesEndRef={messagesEndRef}
+        />
+
+      case 'audio':
+        return <AudioTab />
+
+      case 'debug':
+        return <DebugTab />
+
+      case 'tests':
+        return <TestsTab />
+
+      case 'tools':
+        return <ToolsTab tools={tools} />
+
+      default:
+        return <HomeTab
+          services={services}
+          messages={messages}
+          inputValue={inputValue}
+          setInputValue={setInputValue}
+          sendMessage={sendMessage}
+          wsConnected={wsConnected}
+          messagesEndRef={messagesEndRef}
+        />
+    }
+  }
+
   return (
     <div className="app">
       <header className="header">
-        <h1>Freya v2.0 Dashboard</h1>
-        <p>Real-time monitoring and control interface</p>
+        <div className="header-content">
+          <div>
+            <h1>Freya v2.0 Dashboard</h1>
+            <p>Real-time monitoring and control interface</p>
+          </div>
+          <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+        </div>
+
+        {/* Tab Navigation */}
+        <nav className="tab-nav">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              className={`tab-button ${activeTab === tab.id ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+              title={tab.shortcut}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
       </header>
 
       <main className="main-content">
-        {/* Left Panel - Services */}
-        <div className="panel">
-          <h2 className="panel-header">Services</h2>
-          <div className="services-grid">
-            {services.length === 0 ? (
-              <p style={{ color: '#94a3b8', textAlign: 'center', padding: '2rem' }}>
-                No services found. Waiting for data...
-              </p>
-            ) : (
-              services.map((service) => (
-                <div key={service.name} className="service-item">
-                  <span className="service-name">{service.name}</span>
-                  <div className="service-status">
-                    <div className={`status-dot ${service.healthy ? 'healthy' : 'unhealthy'}`}></div>
-                    <span>{service.status}</span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* Tools Log */}
-          <h2 className="panel-header" style={{ marginTop: '2rem' }}>Tool Calls</h2>
-          <div className="tools-container">
-            {tools.length === 0 ? (
-              <p style={{ color: '#94a3b8', textAlign: 'center', padding: '1rem' }}>
-                No tool calls yet
-              </p>
-            ) : (
-              tools.slice(-10).reverse().map((tool) => (
-                <div key={tool.id} className="tool-item">
-                  <div className="tool-header">
-                    <span className="tool-name">{tool.tool_name}</span>
-                    <span className={`tool-status ${tool.success ? 'success' : 'error'}`}>
-                      {tool.success ? 'Success' : 'Error'}
-                    </span>
-                  </div>
-                  {tool.duration && (
-                    <div className="tool-duration">
-                      Duration: {tool.duration.toFixed(2)}s
-                    </div>
-                  )}
-                  {tool.error && (
-                    <div style={{ color: '#fca5a5', fontSize: '0.875rem', marginTop: '0.25rem' }}>
-                      {tool.error}
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Right Panel - Chat */}
-        <div className="panel">
-          <h2 className="panel-header">Conversation</h2>
-          <div className="chat-window">
-            <div className="messages-container">
-              {messages.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
-                  <p>No messages yet. Start a conversation!</p>
-                </div>
-              ) : (
-                messages.map((msg) => (
-                  <div key={msg.id} className={`message ${msg.role}`}>
-                    <div>{msg.content}</div>
-                    <div className="message-meta">
-                      {new Date(msg.timestamp).toLocaleTimeString()}
-                      {msg.location && ` • ${msg.location}`}
-                    </div>
-                  </div>
-                ))
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            <div className="chat-input-container">
-              <form onSubmit={sendMessage} className="chat-input-form">
-                <input
-                  type="text"
-                  className="chat-input"
-                  placeholder="Type your message..."
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  disabled={!wsConnected}
-                />
-                <button
-                  type="submit"
-                  className="send-button"
-                  disabled={!wsConnected || !inputValue.trim()}
-                >
-                  Send
-                </button>
-              </form>
-            </div>
-          </div>
+        <div className="tab-content">
+          {renderTabContent()}
         </div>
       </main>
 
@@ -241,6 +270,157 @@ function App() {
       <div className={`connection-status ${wsConnected ? 'connected' : 'disconnected'}`}>
         <div className={`status-dot ${wsConnected ? 'healthy' : 'unhealthy'}`}></div>
         <span>{wsConnected ? 'Connected' : 'Disconnected'}</span>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Tab Components
+// ============================================================================
+
+function HomeTab({ services, messages, inputValue, setInputValue, sendMessage, wsConnected, messagesEndRef }) {
+  return (
+    <div className="home-tab">
+      {/* Left Panel - Services */}
+      <div className="panel">
+        <h2 className="panel-header">Services Status</h2>
+        <div className="services-grid">
+          {services.length === 0 ? (
+            <p className="empty-state">
+              No services found. Waiting for data...
+            </p>
+          ) : (
+            services.map((service) => (
+              <div key={service.name} className="service-item">
+                <span className="service-name">{service.name}</span>
+                <div className="service-status">
+                  <div className={`status-dot ${service.healthy ? 'healthy' : 'unhealthy'}`}></div>
+                  <span>{service.status}</span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Right Panel - Chat */}
+      <div className="panel">
+        <h2 className="panel-header">Conversation</h2>
+        <div className="chat-window">
+          <div className="messages-container">
+            {messages.length === 0 ? (
+              <div className="empty-state">
+                <p>No messages yet. Start a conversation!</p>
+              </div>
+            ) : (
+              messages.map((msg) => (
+                <div key={msg.id} className={`message ${msg.role}`}>
+                  <div>{msg.content}</div>
+                  <div className="message-meta">
+                    {new Date(msg.timestamp).toLocaleTimeString()}
+                    {msg.location && ` • ${msg.location}`}
+                  </div>
+                </div>
+              ))
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div className="chat-input-container">
+            <form onSubmit={sendMessage} className="chat-input-form">
+              <input
+                type="text"
+                className="chat-input"
+                placeholder="Type your message..."
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                disabled={!wsConnected}
+              />
+              <button
+                type="submit"
+                className="send-button"
+                disabled={!wsConnected || !inputValue.trim()}
+              >
+                Send
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AudioTab() {
+  return (
+    <div className="placeholder-tab">
+      <div className="placeholder-content">
+        <h2>🎤 Audio Testing</h2>
+        <p>Audio device testing and TTS tools will be available here.</p>
+        <div className="placeholder-badge">Coming in Session 3</div>
+      </div>
+    </div>
+  )
+}
+
+function DebugTab() {
+  return (
+    <div className="placeholder-tab">
+      <div className="placeholder-content">
+        <h2>🐛 Debug Panel</h2>
+        <p>Real-time message bus traffic viewer will be available here.</p>
+        <div className="placeholder-badge">Coming in Session 2</div>
+      </div>
+    </div>
+  )
+}
+
+function TestsTab() {
+  return (
+    <div className="placeholder-tab">
+      <div className="placeholder-content">
+        <h2>🧪 Test Runner</h2>
+        <p>Run and view test results with coverage visualization.</p>
+        <div className="placeholder-badge">Coming in Session 3</div>
+      </div>
+    </div>
+  )
+}
+
+function ToolsTab({ tools }) {
+  return (
+    <div className="tools-tab">
+      <div className="panel">
+        <h2 className="panel-header">MCP Tool Calls History</h2>
+        <div className="tools-container">
+          {tools.length === 0 ? (
+            <p className="empty-state">
+              No tool calls yet
+            </p>
+          ) : (
+            tools.slice(-20).reverse().map((tool) => (
+              <div key={tool.id} className="tool-item">
+                <div className="tool-header">
+                  <span className="tool-name">{tool.tool_name}</span>
+                  <span className={`tool-status ${tool.success ? 'success' : 'error'}`}>
+                    {tool.success ? 'Success' : 'Error'}
+                  </span>
+                </div>
+                {tool.duration && (
+                  <div className="tool-duration">
+                    Duration: {tool.duration.toFixed(2)}s
+                  </div>
+                )}
+                {tool.error && (
+                  <div className="tool-error">
+                    {tool.error}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   )
