@@ -67,19 +67,19 @@ class TestTTSService:
             
             # Simulate LLM response
             await tts_service._handle_llm_response({
-                \"response\": \"Hello, this is a test response\",
-                \"location\": \"test_location\"
+                "response": "Hello, this is a test response",
+                "location": "test_location"
             })
             
             # Verify speech generation was called
             assert mock_gen.called
             call_args = mock_gen.call_args[0]
-            assert \"Hello\" in call_args[0]
+            assert "Hello" in call_args[0]
     
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_handle_tts_request(self, tts_service, mock_message_bus):
-        \"\"\"Test direct TTS requests.\"\"\"
+        """Test direct TTS requests."""
         await tts_service.initialize()
         await tts_service.start()
         
@@ -87,8 +87,8 @@ class TestTTSService:
             mock_gen.return_value = b'mock_audio_data'
             
             await tts_service._handle_tts_request({
-                \"text\": \"Direct TTS request\",
-                \"location\": \"test_location\"
+                "text": "Direct TTS request",
+                "location": "test_location"
             })
             
             assert mock_gen.called
@@ -96,14 +96,14 @@ class TestTTSService:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_skip_short_responses(self, tts_service):
-        \"\"\"Test that very short responses are skipped.\"\"\"
+        """Test that very short responses are skipped."""
         await tts_service.initialize()
         await tts_service.start()
         
         with patch.object(tts_service, '_generate_speech', new_callable=AsyncMock) as mock_gen:
             # Very short response should be skipped
             await tts_service._handle_llm_response({
-                \"response\": \"Ok\"
+                "response": "Ok"
             })
             
             # Speech generation should not be called
@@ -112,17 +112,17 @@ class TestTTSService:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_generation_metrics(self, tts_service):
-        \"\"\"Test that generation metrics are tracked.\"\"\"
+        """Test that generation metrics are tracked."""
         await tts_service.initialize()
         
         # Mock MCP call
         with patch.object(tts_service, '_call_mcp_tool', new_callable=AsyncMock) as mock_mcp:
             mock_mcp.return_value = {
-                \"success\": True,
-                \"audio_data\": b'mock_audio'
+                "success": True,
+                "audio_data": b'mock_audio'
             }
             
-            await tts_service._generate_speech(\"Test text\")
+            await tts_service._generate_speech("Test text")
             
             # Check metrics were updated
             assert tts_service.generation_count == 1
@@ -131,7 +131,7 @@ class TestTTSService:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_health_check(self, tts_service):
-        \"\"\"Test health check functionality.\"\"\"
+        """Test health check functionality."""
         # Unhealthy before initialization
         assert await tts_service.health_check() is False
         

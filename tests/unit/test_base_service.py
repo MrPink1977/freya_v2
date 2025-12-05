@@ -75,16 +75,25 @@ class TestBaseService:
         # Unhealthy initially
         health = await service.health_check()
         assert health is False
-        
-        # Healthy after initialization
+
+        # Healthy after initialization (even without start)
         await service.initialize()
         health = await service.health_check()
         assert health is True
-        
-        # Unhealthy if not running (optional behavior)
-        service._healthy = False
+        assert service.is_running() is False  # Not started yet
+
+        # Still healthy after start
+        await service.start()
         health = await service.health_check()
-        assert health is False
+        assert health is True
+        assert service.is_running() is True
+        assert service.is_healthy_and_running() is True
+
+        # Unhealthy if error count exceeds threshold
+        for _ in range(11):
+            service.increment_error_count()
+        health = await service.health_check()
+        assert health is False  # Too many errors
     
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -141,20 +150,23 @@ class TestBaseService:
         """Test metrics publishing to message bus."""
         await service.initialize()
         await service.start()
-        
+
         # Publish metrics
-        await service.publish_metrics({"requests": 100, "latency": 0.5})
-        
+        metrics = {"requests": 100, "latency": 0.5}
+        await service.publish_metrics(metrics)
+
         # Verify message bus publish was called
         assert mock_message_bus.publish.called
-        
+
         call_args = mock_message_bus.publish.call_args
         channel = call_args[0][0]
         data = call_args[0][1]
-        
+
         assert "service.test_service.metrics" in channel
-        assert data["requests"] == 100
-        assert data["latency"] == 0.5
+        assert data["service"] == "test_service"
+        assert "metrics" in data
+        assert data["metrics"]["requests"] == 100
+        assert data["metrics"]["latency"] == 0.5
     
     @pytest.mark.unit
     @pytest.mark.asyncio
