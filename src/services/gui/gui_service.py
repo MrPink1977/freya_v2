@@ -109,6 +109,8 @@ class GUIService(BaseService):
         self.service_statuses: Dict[str, Dict[str, Any]] = {}
         self.chat_history: List[Dict[str, Any]] = []
         self.tool_history: List[Dict[str, Any]] = []
+        self.message_history: List[Dict[str, Any]] = []  # Debug panel message bus log
+        self.max_message_history = 100  # Keep last 100 messages
 
         # Server reference
         self._server: Optional[uvicorn.Server] = None
@@ -276,6 +278,20 @@ class GUIService(BaseService):
                 )
             except Exception as e:
                 logger.error(f"[{self.name}] Error getting tool calls: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        # Debug message history endpoint
+        @self.app.get("/api/debug/messages")
+        async def get_debug_messages():
+            """Get recent message bus traffic for debug panel."""
+            try:
+                return {
+                    "messages": self.message_history,
+                    "total": len(self.message_history),
+                    "timestamp": datetime.now().isoformat()
+                }
+            except Exception as e:
+                logger.error(f"[{self.name}] Error getting debug messages: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
         # Send user message endpoint
@@ -475,6 +491,8 @@ class GUIService(BaseService):
             await self.message_bus.subscribe("mcp.tool.result", self._handle_tool_result)
             await self.message_bus.subscribe("llm.final_response", self._handle_llm_response)
 
+            # Note: Message logging is now integrated into existing handlers
+
             logger.info(f"[{self.name}] Subscribed to message bus channels")
 
             # Start FastAPI server
@@ -569,9 +587,42 @@ class GUIService(BaseService):
 
     # Message Bus Handlers
 
+    async def _log_message(self, channel: str, data: Any) -> None:
+        """
+        Log message bus traffic for debug panel.
+
+        Args:
+            channel: Message bus channel name
+            data: Message data
+        """
+        try:
+            message_entry = {
+                "channel": channel,
+                "message": data,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            self.message_history.append(message_entry)
+
+            # Trim to max size
+            if len(self.message_history) > self.max_message_history:
+                self.message_history = self.message_history[-self.max_message_history:]
+
+            # Broadcast to WebSocket clients
+            await self.ws_manager.broadcast({
+                "type": "bus_message",
+                "data": message_entry
+            })
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Error logging message: {e}")
+
     async def _handle_service_status(self, data: Dict[str, Any]) -> None:
         """Handle service status updates from message bus."""
         try:
+            # Log to debug panel
+            await self._log_message("service.status", data)
+
             service_name = data.get("service", "unknown")
             status = data.get("status", "unknown")
 
@@ -598,6 +649,9 @@ class GUIService(BaseService):
     async def _handle_service_metrics(self, data: Dict[str, Any]) -> None:
         """Handle service metrics updates from message bus."""
         try:
+            # Log to debug panel
+            await self._log_message("service.metrics", data)
+
             service_name = data.get("service", "unknown")
 
             if service_name in self.service_statuses:
@@ -615,6 +669,9 @@ class GUIService(BaseService):
     async def _handle_tool_execute(self, data: Dict[str, Any]) -> None:
         """Handle tool execution requests from message bus."""
         try:
+            # Log to debug panel
+            await self._log_message("mcp.tool.execute", data)
+
             tool_call = {
                 "id": data.get("request_id", str(uuid.uuid4())),
                 "tool_name": data.get("tool_name", "unknown"),
@@ -638,6 +695,9 @@ class GUIService(BaseService):
     async def _handle_tool_result(self, data: Dict[str, Any]) -> None:
         """Handle tool execution results from message bus."""
         try:
+            # Log to debug panel
+            await self._log_message("mcp.tool.result", data)
+
             request_id = data.get("request_id")
 
             # Find and update the corresponding tool call
@@ -658,6 +718,9 @@ class GUIService(BaseService):
     async def _handle_llm_response(self, data: Dict[str, Any]) -> None:
         """Handle LLM response messages from message bus."""
         try:
+            # Log to debug panel
+            await self._log_message("llm.final_response", data)
+
             chat_msg = {
                 "id": str(uuid.uuid4()),
                 "role": "assistant",

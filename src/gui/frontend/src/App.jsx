@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
+import ServiceMetrics from './components/ServiceMetrics'
+import DebugPanel from './components/DebugPanel'
 
 const API_URL = 'http://localhost:8000'
 const WS_URL = 'ws://localhost:8000/ws'
@@ -285,23 +287,7 @@ function HomeTab({ services, messages, inputValue, setInputValue, sendMessage, w
       {/* Left Panel - Services */}
       <div className="panel">
         <h2 className="panel-header">Services Status</h2>
-        <div className="services-grid">
-          {services.length === 0 ? (
-            <p className="empty-state">
-              No services found. Waiting for data...
-            </p>
-          ) : (
-            services.map((service) => (
-              <div key={service.name} className="service-item">
-                <span className="service-name">{service.name}</span>
-                <div className="service-status">
-                  <div className={`status-dot ${service.healthy ? 'healthy' : 'unhealthy'}`}></div>
-                  <span>{service.status}</span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+        <ServiceMetrics services={services} />
       </div>
 
       {/* Right Panel - Chat */}
@@ -366,12 +352,8 @@ function AudioTab() {
 
 function DebugTab() {
   return (
-    <div className="placeholder-tab">
-      <div className="placeholder-content">
-        <h2>🐛 Debug Panel</h2>
-        <p>Real-time message bus traffic viewer will be available here.</p>
-        <div className="placeholder-badge">Coming in Session 2</div>
-      </div>
+    <div className="debug-tab">
+      <DebugPanel />
     </div>
   )
 }
