@@ -1,487 +1,221 @@
 """
-Configuration Management - Centralized settings for Freya v2.0
+Configuration Management - YAML-based settings for Freya v2.0
 
-Uses Pydantic Settings for type-safe configuration from environment
-variables and .env files with comprehensive validation.
+Loads configuration from config/default.yaml with Pydantic validation.
+Environment variables can override YAML settings.
 
 Author: MrPink1977
-Version: 0.1.0
-Date: 2025-12-03
+Version: 0.4.0
+Date: 2024-12-06
 """
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator, HttpUrl
-from typing import Optional, Literal, List
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, Literal, List, Dict, Any
 from pathlib import Path
+import yaml
 
 
-class FreyaConfig(BaseSettings):
-    """
-    Main configuration for Freya v2.0.
+class OllamaConfig(BaseModel):
+    """Ollama LLM configuration."""
+    host: str = "http://localhost:11434"
+    model: str = "llama3.2:3b"
+    options: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AppConfig(BaseModel):
+    """Application configuration."""
+    system_prompt: str
+    max_history: int = 12
+    wake_word: str = "Hey, Freya"
+    wake_word_sensitivity: float = 0.75
+    wake_session_seconds: float = 8.0
+    startup_mode: Literal["normal", "diagnostic"] = "normal"
+    prompt_for_mode: bool = True
+    interaction_mode: Literal["voice", "text"] = "voice"
+    mode_toggle_hotkey: str = "ctrl+t"
+
+
+class STTConfig(BaseModel):
+    """Speech-to-Text configuration."""
+    model: str = "base"
+    device: str = "cuda"
+    sample_rate: int = 16000
+    silence_threshold: float = 0.02
+    silence_duration: float = 1.2
+    max_record_seconds: int = 30
+    prompt_tone_frequency: int = 880
+    prompt_tone_duration: float = 0.2
+    prompt_tone_volume: float = 0.2
+
+
+class ElevenLabsConfig(BaseModel):
+    """ElevenLabs TTS configuration."""
+    api_key: str = ""
+    voice_id: str = "AXdMgz6evoL7OPd7eU12"
+    model: str = "eleven_turbo_v2_5"
+    stability: float = 0.5
+    similarity_boost: float = 0.75
+    style: float = 0.0
+    use_speaker_boost: bool = True
+
+
+class TTSConfig(BaseModel):
+    """Text-to-Speech configuration."""
+    engine: Literal["piper", "elevenlabs"] = "elevenlabs"
+    voice_path: str = "voices/en_GB-southern_english_female-low.onnx"
+    preload_phrases: List[str] = Field(default_factory=list)
+    elevenlabs: ElevenLabsConfig = Field(default_factory=ElevenLabsConfig)
+
+
+class WakeDetectorConfig(BaseModel):
+    """Wake word detector configuration."""
+    model: str = "tiny"
+    device: str = "cuda"
+    sample_rate: int = 16000
+    chunk_seconds: float = 2.0
+
+
+class ShortTermMemoryConfig(BaseModel):
+    """Short-term memory configuration."""
+    max_history: int = 12
+    enable_summarization: bool = True
+    summary_trigger_ratio: float = 0.8
+    max_summaries: int = 3
+
+
+class LongTermMemoryConfig(BaseModel):
+    """Long-term memory configuration."""
+    enabled: bool = True
+    store_type: str = "sqlite"
+    db_path: str = "data/freya_memory.db"
+    recall_limit: int = 3
+    min_similarity: float = 0.2
+    auto_store_keywords: List[str] = Field(default_factory=list)
+    store_assistant_messages: bool = False
+
+
+class MemoryConfig(BaseModel):
+    """Memory system configuration."""
+    short_term: ShortTermMemoryConfig = Field(default_factory=ShortTermMemoryConfig)
+    long_term: LongTermMemoryConfig = Field(default_factory=LongTermMemoryConfig)
+
+
+class WebSearchConfig(BaseModel):
+    """Web search configuration."""
+    enabled: bool = True
+    max_results: int = 5
+    trigger_keywords: List[str] = Field(default_factory=list)
+
+
+class FacialRecognitionConfig(BaseModel):
+    """Facial recognition configuration."""
+    enabled: bool = False
+    known_faces_dir: str = "data/faces"
+    detection_model: Literal["hog", "cnn"] = "hog"
+    encoding_model: Literal["small", "large"] = "small"
+    tolerance: float = 0.5
+    camera_channel: Optional[int] = None
+    min_recognition_interval: float = 5.0
+
+
+class VisionConfig(BaseModel):
+    """Vision system configuration."""
+    facial_recognition: FacialRecognitionConfig = Field(default_factory=FacialRecognitionConfig)
+
+
+class PersonalityTraits(BaseModel):
+    """Personality trait values."""
+    directness: float = Field(default=0.8, ge=0.0, le=1.0)
+    humor_level: float = Field(default=0.7, ge=0.0, le=1.0)
+    empathy: float = Field(default=0.7, ge=0.0, le=1.0)
+    formality: float = Field(default=0.2, ge=0.0, le=1.0)
+    verbosity: float = Field(default=0.3, ge=0.0, le=1.0)
+    curiosity: float = Field(default=0.5, ge=0.0, le=1.0)
+    sassiness: float = Field(default=0.6, ge=0.0, le=1.0)
+    patience: float = Field(default=0.8, ge=0.0, le=1.0)
+
+
+class PersonalityConfig(BaseModel):
+    """Personality system configuration."""
+    enabled: bool = True
+    traits: PersonalityTraits = Field(default_factory=PersonalityTraits)
+
+
+class FreyaConfig(BaseModel):
+    """Main Freya configuration loaded from YAML."""
+    ollama: OllamaConfig
+    app: AppConfig
+    stt: STTConfig
+    tts: TTSConfig
+    wake_detector: WakeDetectorConfig
+    memory: MemoryConfig
+    web_search: WebSearchConfig
+    vision: VisionConfig
+    personality: PersonalityConfig
     
-    All settings can be overridden via environment variables.
-    Settings are loaded from .env file if present.
+    redis_host: str = "redis"
+    redis_port: int = 6379
+    redis_max_retries: int = 3
+    redis_retry_delay: float = 1.0
     
-    Example:
-        >>> config = FreyaConfig()
-        >>> print(config.ollama_host)
-        'http://ollama:11434'
-    """
-    
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore"  # Ignore unknown env vars
-    )
-    
-    # ==================== Redis Configuration ====================
-    redis_host: str = Field(
-        default="redis",
-        description="Redis server hostname",
-        examples=["redis", "localhost", "192.168.1.100"]
-    )
-    
-    redis_port: int = Field(
-        default=6379,
-        ge=1,
-        le=65535,
-        description="Redis server port"
-    )
-    
-    redis_max_retries: int = Field(
-        default=3,
-        ge=1,
-        le=10,
-        description="Maximum connection retry attempts"
-    )
-    
-    redis_retry_delay: float = Field(
-        default=1.0,
-        ge=0.1,
-        le=10.0,
-        description="Delay between retries in seconds"
-    )
-    
-    # ==================== Ollama Configuration ====================
-    ollama_host: str = Field(
-        default="http://ollama:11434",
-        description="Ollama API host URL",
-        examples=["http://ollama:11434", "http://localhost:11434"]
-    )
-    
-    ollama_model: str = Field(
-        default="llama3.2:latest",
-        description="LLM model to use",
-        examples=["llama3.2:latest", "llama3.2:3b", "mistral:latest"]
-    )
-    
-    ollama_timeout: float = Field(
-        default=120.0,
-        ge=10.0,
-        description="Ollama request timeout in seconds"
-    )
-    
-    ollama_temperature: float = Field(
-        default=0.7,
-        ge=0.0,
-        le=2.0,
-        description="LLM temperature for response generation"
-    )
-    
-    # ==================== ChromaDB Configuration ====================
-    chromadb_host: str = Field(
-        default="chromadb",
-        description="ChromaDB server hostname"
-    )
-    
-    chromadb_port: int = Field(
-        default=8000,
-        ge=1,
-        le=65535,
-        description="ChromaDB server port"
-    )
-    
-    chromadb_collection_name: str = Field(
-        default="freya_memories",
-        description="ChromaDB collection name for memories"
-    )
-    
-    # ==================== ElevenLabs Configuration ====================
-    elevenlabs_api_key: Optional[str] = Field(
-        default=None,
-        description="ElevenLabs API key for TTS"
-    )
-    
-    elevenlabs_voice_id: str = Field(
-        default="21m00Tcm4TlvDq8ikWAM",
-        description="ElevenLabs voice ID (default: Rachel)"
-    )
-    
-    elevenlabs_model: str = Field(
-        default="eleven_monolingual_v1",
-        description="ElevenLabs TTS model"
-    )
-    
-    elevenlabs_stability: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Voice stability (0=variable, 1=stable)"
-    )
-    
-    elevenlabs_similarity_boost: float = Field(
-        default=0.75,
-        ge=0.0,
-        le=1.0,
-        description="Voice similarity boost"
-    )
-    
-    # ==================== Porcupine Configuration ====================
-    porcupine_access_key: Optional[str] = Field(
-        default=None,
-        description="Porcupine access key for wake word detection"
-    )
-    
-    porcupine_keyword: str = Field(
-        default="jarvis",
-        description="Wake word keyword",
-        examples=["jarvis", "alexa", "hey google"]
-    )
-    
-    porcupine_sensitivity: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Wake word detection sensitivity (0=less sensitive, 1=more sensitive)"
-    )
-    
-    # ==================== Audio Configuration ====================
-    audio_sample_rate: int = Field(
-        default=16000,
-        description="Audio sample rate in Hz"
-    )
-    
-    audio_channels: int = Field(
-        default=1,
-        ge=1,
-        le=2,
-        description="Number of audio channels (1=mono, 2=stereo)"
-    )
-    
-    audio_chunk_size: int = Field(
-        default=1024,
-        ge=256,
-        le=8192,
-        description="Audio chunk size for streaming"
-    )
-    
-    # ==================== STT Configuration ====================
-    stt_model: str = Field(
-        default="base",
-        description="Whisper model size",
-        examples=["tiny", "base", "small", "medium", "large"]
-    )
-    
-    stt_language: str = Field(
-        default="en",
-        description="Primary language for STT"
-    )
-    
-    stt_device: Literal["cpu", "cuda", "auto"] = Field(
-        default="auto",
-        description="Device for STT inference"
-    )
-    
-    # ==================== GUI Configuration ====================
     gui_enabled: bool = True
     gui_host: str = "0.0.0.0"
     gui_port: int = 8000
-    gui_cors_origins: List[str] = ["http://localhost:5173", "http://localhost:8000"]
+    gui_cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     gui_websocket_heartbeat: int = 30
     gui_log_retention: int = 1000
+    gui_jwt_secret: str = "change-this-secret-in-production"
+    gui_token_expiry: int = 3600
+    gui_session_timeout: int = 3600
+    gui_max_sessions: int = 100
+    gui_rate_limit_rate: float = 10.0
+    gui_rate_limit_burst: int = 20
     
-    # GUI Security
-    gui_jwt_secret: str = Field(
-        default="change-this-secret-in-production",
-        description="JWT secret key for WebSocket authentication"
-    )
-    gui_token_expiry: int = Field(
-        default=3600,
-        ge=60,
-        le=86400,
-        description="JWT token expiration time in seconds (default: 1 hour)"
-    )
-    gui_session_timeout: int = Field(
-        default=3600,
-        ge=60,
-        le=86400,
-        description="Session timeout in seconds (default: 1 hour)"
-    )
-    gui_max_sessions: int = Field(
-        default=100,
-        ge=1,
-        le=1000,
-        description="Maximum concurrent WebSocket sessions"
-    )
-    gui_rate_limit_rate: float = Field(
-        default=10.0,
-        ge=1.0,
-        le=100.0,
-        description="Rate limit requests per second per session"
-    )
-    gui_rate_limit_burst: int = Field(
-        default=20,
-        ge=1,
-        le=200,
-        description="Rate limit burst size"
-    )
-
-    # ==================== MCP Configuration ====================
-    mcp_enabled: bool = Field(
-        default=True,
-        description="Enable MCP Gateway service"
-    )
-
-    mcp_servers_config: str = Field(
-        default="config/mcp_servers.yaml",
-        description="Path to MCP servers configuration file"
-    )
-
-    mcp_connection_timeout: int = Field(
-        default=30,
-        ge=5,
-        le=120,
-        description="MCP server connection timeout in seconds"
-    )
-
-    mcp_tool_timeout: int = Field(
-        default=60,
-        ge=10,
-        le=300,
-        description="Tool execution timeout in seconds"
-    )
-
-    mcp_retry_attempts: int = Field(
-        default=3,
-        ge=1,
-        le=10,
-        description="Number of retry attempts for failed operations"
-    )
-
-    mcp_cache_tool_schemas: bool = Field(
-        default=True,
-        description="Cache tool schemas to reduce discovery overhead"
-    )
-
-    mcp_log_tool_calls: bool = Field(
-        default=True,
-        description="Log all tool calls and results for debugging"
-    )
-
-    # ==================== Notification Configuration ====================
-    notification_email_enabled: bool = Field(
-        default=False,
-        description="Enable email notifications"
-    )
-
-    notification_email_smtp_host: str = Field(
-        default="smtp.gmail.com",
-        description="SMTP server hostname for email notifications"
-    )
-
-    notification_email_smtp_port: int = Field(
-        default=587,
-        ge=1,
-        le=65535,
-        description="SMTP server port"
-    )
-
-    notification_email_from: str = Field(
-        default="freya@example.com",
-        description="Email sender address"
-    )
-
-    notification_email_username: Optional[str] = Field(
-        default=None,
-        description="SMTP authentication username"
-    )
-
-    notification_email_password: Optional[str] = Field(
-        default=None,
-        description="SMTP authentication password"
-    )
-
-    notification_webhook_enabled: bool = Field(
-        default=False,
-        description="Enable webhook notifications"
-    )
-
-    notification_webhook_url: Optional[str] = Field(
-        default=None,
-        description="Webhook URL for notifications"
-    )
-
-    notification_webhook_secret: Optional[str] = Field(
-        default=None,
-        description="Webhook secret for request signing"
-    )
-
-    notification_push_enabled: bool = Field(
-        default=False,
-        description="Enable push notifications"
-    )
-
-    notification_push_provider: Literal["fcm", "apns", "none"] = Field(
-        default="none",
-        description="Push notification provider"
-    )
-
-    notification_push_api_key: Optional[str] = Field(
-        default=None,
-        description="Push notification API key"
-    )
-
-    notification_sms_enabled: bool = Field(
-        default=False,
-        description="Enable SMS notifications"
-    )
-
-    notification_sms_provider: Literal["twilio", "none"] = Field(
-        default="none",
-        description="SMS provider"
-    )
-
-    notification_sms_account_sid: Optional[str] = Field(
-        default=None,
-        description="SMS provider account SID (e.g., Twilio)"
-    )
-
-    notification_sms_auth_token: Optional[str] = Field(
-        default=None,
-        description="SMS provider auth token"
-    )
-
-    notification_sms_from_number: Optional[str] = Field(
-        default=None,
-        description="SMS sender phone number"
-    )
-
-    # ==================== Logging Configuration ====================
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
-        default="INFO",
-        description="Logging level"
-    )
+    mcp_enabled: bool = True
+    mcp_servers_config: str = "config/mcp_servers.yaml"
+    mcp_connection_timeout: int = 30
+    mcp_tool_timeout: int = 60
+    mcp_max_retries: int = 3
     
-    log_dir: Path = Field(
-        default=Path("logs"),
-        description="Directory for log files"
-    )
+    chromadb_host: str = "chromadb"
+    chromadb_port: int = 8000
+    chromadb_collection_name: str = "freya_memories"
     
-    log_rotation: str = Field(
-        default="1 day",
-        description="Log rotation interval"
-    )
+    notification_enabled: bool = True
+    notification_default_duration: int = 5
+    notification_sound_enabled: bool = True
     
-    log_retention: str = Field(
-        default="7 days",
-        description="Log retention period"
-    )
+    audio_sample_rate: int = 16000
+    audio_channels: int = 1
+    audio_chunk_size: int = 1024
     
-    log_format: str = Field(
-        default="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-        description="Loguru log format string"
-    )
+    personality_name: str = "Freya"
+    personality_style: Literal["witty_sarcastic", "professional", "casual", "friendly"] = "witty_sarcastic"
+    personality_verbosity: Literal["concise", "normal", "verbose"] = "concise"
     
-    # ==================== Personality Configuration ====================
-    personality_name: str = Field(
-        default="Freya",
-        description="Assistant name"
-    )
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    log_format: str = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>"
+    log_rotation: str = "100 MB"
+    log_retention: str = "1 week"
+    log_file: str = "logs/freya.log"
     
-    personality_style: Literal["witty_sarcastic", "professional", "casual", "friendly"] = Field(
-        default="witty_sarcastic",
-        description="Personality style"
-    )
-    
-    personality_verbosity: Literal["concise", "normal", "verbose"] = Field(
-        default="normal",
-        description="Response verbosity level"
-    )
-    
-    # ==================== Memory Configuration ====================
-    memory_max_short_term: int = Field(
-        default=20,
-        ge=5,
-        le=100,
-        description="Maximum short-term memory entries"
-    )
-    
-    memory_similarity_threshold: float = Field(
-        default=0.7,
-        ge=0.0,
-        le=1.0,
-        description="Similarity threshold for memory deduplication"
-    )
-    
-    memory_auto_summarize: bool = Field(
-        default=True,
-        description="Enable automatic memory summarization"
-    )
-    
-    # ==================== System Configuration ====================
-    environment: Literal["development", "production", "testing"] = Field(
-        default="development",
-        description="Runtime environment"
-    )
-    
-    debug_mode: bool = Field(
-        default=False,
-        description="Enable debug mode"
-    )
-    
-    @field_validator("log_dir")
     @classmethod
-    def create_log_dir(cls, v: Path) -> Path:
-        """Ensure log directory exists."""
-        v.mkdir(parents=True, exist_ok=True)
-        return v
+    def load_from_yaml(cls, yaml_path: str = "config/default.yaml") -> "FreyaConfig":
+        """Load configuration from YAML file."""
+        config_file = Path(yaml_path)
         
-    @field_validator("ollama_host")
-    @classmethod
-    def validate_ollama_host(cls, v: str) -> str:
-        """Ensure Ollama host starts with http:// or https://."""
-        if not v.startswith(("http://", "https://")):
-            return f"http://{v}"
-        return v
+        if not config_file.exists():
+            raise FileNotFoundError(f"Configuration file not found: {yaml_path}")
         
-    def get_redis_url(self) -> str:
-        """
-        Get the full Redis connection URL.
+        with open(config_file, "r", encoding="utf-8") as f:
+            yaml_data = yaml.safe_load(f)
         
-        Returns:
-            Redis URL string
-        """
-        return f"redis://{self.redis_host}:{self.redis_port}"
-        
-    def get_chromadb_url(self) -> str:
-        """
-        Get the full ChromaDB connection URL.
-        
-        Returns:
-            ChromaDB URL string
-        """
-        return f"http://{self.chromadb_host}:{self.chromadb_port}"
-        
-    def is_production(self) -> bool:
-        """Check if running in production environment."""
-        return self.environment == "production"
-        
-    def is_development(self) -> bool:
-        """Check if running in development environment."""
-        return self.environment == "development"
+        return cls(**yaml_data)
 
 
-# Global config instance
-# This is the single source of truth for all configuration
-config = FreyaConfig()
+def load_config() -> FreyaConfig:
+    """Load Freya configuration from YAML file."""
+    return FreyaConfig.load_from_yaml()
+
+
+config = load_config()
