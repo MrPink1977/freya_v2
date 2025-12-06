@@ -24,6 +24,7 @@ from src.services.mcp_gateway import MCPGateway
 from src.services.gui import GUIService
 from src.services.tts import TTSService
 from src.services.audio import AudioManager
+from src.services.notification import NotificationService
 
 
 class FreyaOrchestrator:
@@ -124,8 +125,15 @@ class FreyaOrchestrator:
             await audio_manager.initialize()
             self.services.append(audio_manager)
             logger.success("  ✓ Audio Manager initialized")
-            
+
             # Note: STT Service already initialized separately if enabled
+
+            # Phase 3: Notification Service
+            logger.info("  - Initializing Notification Service...")
+            notification_service = NotificationService(self.message_bus)
+            await notification_service.initialize()
+            self.services.append(notification_service)
+            logger.success("  ✓ Notification Service initialized")
             
             # TODO Phase 4: Add Memory Manager
             # logger.info("  - Initializing Memory Manager...")
