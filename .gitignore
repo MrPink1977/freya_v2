@@ -9,7 +9,7 @@ develop-eggs/
 dist/
 downloads/
 eggs/
-.eggs/
+ .eggs/
 lib/
 lib64/
 parts/
@@ -73,3 +73,7 @@ htmlcov/
 
 # Abacus internal files
 .abacus.donotdelete
+node_modules/ 
+FREYA_CODING_MODEL_PROMPT.md 
+setup_ai_prompt.sh 
+owui.js 
