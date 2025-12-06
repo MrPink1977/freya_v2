@@ -5,8 +5,8 @@ Manages the local LLM (via Ollama), handles conversation context,
 and generates responses based on user input and retrieved memories.
 
 Author: MrPink1977
-Version: 0.1.0
-Date: 2025-12-03
+Version: 0.2.0
+Date: 2024-12-06
 """
 
 from typing import Optional, List, Dict, Any
@@ -19,10 +19,12 @@ import uuid
 from src.core.base_service import BaseService, ServiceError
 from src.core.message_bus import MessageBus
 from src.core.config import config
+from src.core.retry import retry_with_backoff, RetryExhaustedError
+from src.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 
 
 class LLMEngineError(ServiceError):
-    """Exception raised for LLM Engine specific errors."""
+    """LLM Engine specific errors."""
     pass
 
 
@@ -69,13 +71,21 @@ class LLMEngine(BaseService):
         self.max_history_length = config.memory_max_short_term
         self._generation_count = 0
         self._total_tokens = 0
-
-        # Tool calling support (Phase 1.5)
+        
+        # Circuit breaker for Ollama calls
+        self.ollama_breaker = CircuitBreaker(
+            failure_threshold=5,
+            recovery_timeout=30.0,
+            expected_exception=Exception,
+            name="OllamaCircuitBreaker"
+        )
+        
+        # Tool calling support
         self.available_tools: Dict[str, Any] = {}
         self.tool_call_count = 0
         self._pending_tool_results: Dict[str, Any] = {}
 
-        logger.debug(f"[{self.name}] Initialized with model: {config.ollama_model}")
+        logger.debug(f"[{self.name}] Initialized with model: {config.ollama.model}")
         
     def _build_system_prompt(self) -> str:
         """
@@ -91,48 +101,56 @@ and provide accurate, helpful responses while maintaining your unique charm.""",
             "professional": """You are professional, courteous, and efficient. 
 You provide clear, accurate information and maintain a respectful tone.""",
             "casual": """You are friendly, casual, and approachable. 
-You speak naturally and make users feel comfortable.""",
-            "friendly": """You are warm, supportive, and encouraging. 
-You're always positive and helpful."""
+You communicate in a relaxed, conversational style.""",
+            "friendly": """You are warm, supportive, and genuinely interested in helping. 
+You balance professionalism with a personal touch."""
         }
         
+        personality_style = config.personality_style
         personality_desc = personality_traits.get(
-            config.personality_style, 
-            personality_traits["witty_sarcastic"]
+            personality_style,
+            personality_traits["friendly"]
         )
         
-        return f"""You are {config.personality_name}, a personal AI assistant.
+        return f"""You are Freya, a voice-first AI assistant with genuine personality.
 
 {personality_desc}
 
-Key capabilities:
-- You have access to various tools and can perform actions
-- You remember past conversations and user preferences
-- You are location-aware and know which room the user is in
-- You can be proactive and offer helpful suggestions
+CORE CAPABILITIES:
+- You have access to tools for time/date, calculations, file operations, web search, 
+  web scraping, system info, commands, and performance monitoring
+- Use tools naturally without announcing "I will use tool X"
+- You have both short-term (this conversation) and long-term (across sessions) memory
+- You're running locally on the user's computer for privacy
 
-Always be helpful, accurate, and maintain your personality consistently."""
-        
+COMMUNICATION STYLE:
+- Keep responses concise and natural for voice interaction
+- Be conversational, not robotic
+- Show appropriate emotion and personality
+- Ask follow-up questions when helpful
+
+CURRENT CONTEXT:
+- Today's date: {datetime.now().strftime('%Y-%m-%d')}
+- You're in voice mode - keep responses brief unless detail is requested
+"""
+
     async def initialize(self) -> None:
         """
-        Initialize the Ollama client and pull the model.
+        Initialize the LLM Engine service.
+        
+        Connects to Ollama and verifies the model is available.
         
         Raises:
             LLMEngineError: If initialization fails
         """
         try:
-            logger.info(f"[{self.name}] Initializing Ollama client...")
-            logger.info(f"[{self.name}] Host: {config.ollama_host}")
-            logger.info(f"[{self.name}] Model: {config.ollama_model}")
+            logger.info(f"[{self.name}] Initializing LLM Engine...")
             
-            self.client = ollama.AsyncClient(
-                host=config.ollama_host,
-                timeout=config.ollama_timeout
-            )
+            # Initialize Ollama client
+            self.client = ollama.AsyncClient(host=config.ollama.host)
             
-            # Test connection
+            # Test connection with timeout
             try:
-                logger.info(f"[{self.name}] Testing Ollama connection...")
                 await asyncio.wait_for(
                     self.client.list(),
                     timeout=10.0
@@ -140,18 +158,18 @@ Always be helpful, accurate, and maintain your personality consistently."""
                 logger.success(f"[{self.name}] ✓ Connected to Ollama successfully")
             except asyncio.TimeoutError:
                 raise LLMEngineError(
-                    f"Timeout connecting to Ollama at {config.ollama_host}. "
+                    f"Timeout connecting to Ollama at {config.ollama.host}. "
                     "Please ensure Ollama is running."
                 )
             
             # Pull model if needed
-            logger.info(f"[{self.name}] Ensuring model {config.ollama_model} is available...")
+            logger.info(f"[{self.name}] Ensuring model {config.ollama.model} is available...")
             try:
-                await self.client.pull(config.ollama_model)
-                logger.success(f"[{self.name}] ✓ Model {config.ollama_model} ready")
+                await self.client.pull(config.ollama.model)
+                logger.success(f"[{self.name}] ✓ Model {config.ollama.model} ready")
             except Exception as e:
                 logger.warning(
-                    f"[{self.name}] Could not pull model {config.ollama_model}: {e}. "
+                    f"[{self.name}] Could not pull model {config.ollama.model}: {e}. "
                     "Will attempt to use existing model."
                 )
             
@@ -170,81 +188,45 @@ Always be helpful, accurate, and maintain your personality consistently."""
         """
         Start the LLM Engine service.
         
-        Raises:
-            LLMEngineError: If service fails to start
+        Subscribes to message bus topics and begins processing.
         """
         try:
-            if not self._healthy:
-                raise LLMEngineError("Cannot start unhealthy service. Call initialize() first.")
-                
-            self._mark_started()
-
-            # Subscribe to transcribed text from STT
-            await self.message_bus.subscribe("stt.transcription", self._handle_transcription)
-            logger.info(f"[{self.name}] Subscribed to stt.transcription")
-
-            # Subscribe to tool registry from MCP Gateway (Phase 1.5)
-            if config.mcp_enabled:
-                await self.message_bus.subscribe("mcp.tool.registry", self._handle_tool_registry)
-                await self.message_bus.subscribe("mcp.tool.result", self._handle_tool_result)
-                logger.info(f"[{self.name}] Subscribed to MCP tool channels")
-
-            # Subscribe to GUI user messages (Phase 1.75)
-            if config.gui_enabled:
-                await self.message_bus.subscribe("gui.user.message", self._handle_gui_message)
-                logger.info(f"[{self.name}] Subscribed to gui.user.message")
-
-            await self.publish_status("started", {
-                "model": config.ollama_model,
-                "personality": config.personality_style,
-                "tools_enabled": config.mcp_enabled
-            })
+            logger.info(f"[{self.name}] Starting LLM Engine...")
             
-            logger.success(f"[{self.name}] ✓ LLM Engine started and ready")
+            # Subscribe to transcriptions
+            await self.message_bus.subscribe("stt.transcription", self._handle_transcription)
+            
+            # Subscribe to GUI messages
+            await self.message_bus.subscribe("gui.user_message", self._handle_gui_message)
+            
+            # Subscribe to tool registry updates
+            await self.message_bus.subscribe("mcp.tool_registry", self._handle_tool_registry)
+            
+            self._running = True
+            logger.success(f"[{self.name}] ✓ LLM Engine started successfully")
             
         except Exception as e:
             error_msg = f"Failed to start LLM Engine: {e}"
             logger.exception(f"[{self.name}] {error_msg}")
             raise LLMEngineError(error_msg) from e
-        
+            
     async def stop(self) -> None:
-        """
-        Stop the LLM Engine service.
-        
-        Raises:
-            LLMEngineError: If service fails to stop
-        """
+        """Stop the LLM Engine service."""
         try:
             logger.info(f"[{self.name}] Stopping LLM Engine...")
-
-            await self.message_bus.unsubscribe("stt.transcription")
-            logger.debug(f"[{self.name}] Unsubscribed from stt.transcription")
-
-            # Unsubscribe from GUI channel if enabled
-            if config.gui_enabled:
-                await self.message_bus.unsubscribe("gui.user.message")
-                logger.debug(f"[{self.name}] Unsubscribed from gui.user.message")
-
-            # Unsubscribe from MCP channels if enabled
-            if config.mcp_enabled:
-                await self.message_bus.unsubscribe("mcp.tool.registry")
-                await self.message_bus.unsubscribe("mcp.tool.result")
-                logger.debug(f"[{self.name}] Unsubscribed from MCP tool channels")
-
-            self._mark_stopped()
+            self._running = False
             
-            await self.publish_status("stopped", {
-                "total_generations": self._generation_count,
-                "total_tokens": self._total_tokens
-            })
+            # Unsubscribe from topics
+            await self.message_bus.unsubscribe("stt.transcription", self._handle_transcription)
+            await self.message_bus.unsubscribe("gui.user_message", self._handle_gui_message)
+            await self.message_bus.unsubscribe("mcp.tool_registry", self._handle_tool_registry)
             
-            logger.success(f"[{self.name}] ✓ LLM Engine stopped successfully")
+            logger.success(f"[{self.name}] ✓ LLM Engine stopped")
             
         except Exception as e:
-            error_msg = f"Failed to stop LLM Engine: {e}"
-            logger.exception(f"[{self.name}] {error_msg}")
-            raise LLMEngineError(error_msg) from e
-        
+            logger.exception(f"[{self.name}] Error stopping LLM Engine: {e}")
+            raise LLMEngineError(f"Failed to stop LLM Engine: {e}") from e
+
     async def _handle_transcription(self, data: Dict[str, Any]) -> None:
         """
         Handle incoming transcription from STT service.
@@ -252,37 +234,28 @@ Always be helpful, accurate, and maintain your personality consistently."""
         Args:
             data: Message containing:
                 - text (str): Transcribed user speech
-                - location (str): Where the user is speaking from
-                - timestamp (float): When the speech was captured
-                - confidence (float, optional): Transcription confidence
+                - location (str): Source location identifier
+                - timestamp (str): ISO format timestamp
         """
         try:
             user_text = data.get("text", "").strip()
             location = data.get("location", "unknown")
-            timestamp = data.get("timestamp", datetime.now().timestamp())
-            confidence = data.get("confidence")
+            timestamp = data.get("timestamp", datetime.now().isoformat())
             
             if not user_text:
-                logger.warning(f"[{self.name}] Received empty transcription from {location}")
+                logger.warning(f"[{self.name}] Received empty transcription")
                 return
-                
+            
             logger.info(
-                f"[{self.name}] 📝 [{location}] User: \"{user_text}\" "
-                f"(confidence: {confidence:.2f})" if confidence else ""
+                f"[{self.name}] 🎤 [{location}] User: \"{user_text}\""
             )
             
-            # Publish thinking status for GUI
+            # Publish thinking status
             await self.message_bus.publish("llm.thinking", {
                 "status": "processing",
                 "input": user_text,
                 "location": location
             })
-            
-            # TODO Phase 4: Query memory for relevant context
-            # memory_context = await self._query_memory(user_text)
-            
-            # TODO Phase 3: Determine if tools are needed
-            # tool_results = await self._execute_tools_if_needed(user_text)
             
             # Generate response
             start_time = datetime.now()
@@ -307,11 +280,26 @@ Always be helpful, accurate, and maintain your personality consistently."""
                 f"({generation_time:.2f}s)"
             )
             
+        except CircuitBreakerOpenError as e:
+            logger.error(f"[{self.name}] Circuit breaker open: {e}")
+            await self.message_bus.publish("llm.response", {
+                "text": "I'm having trouble thinking right now. Give me a moment to recover.",
+                "location": data.get("location", "unknown"),
+                "error": True
+            })
+            
+        except RetryExhaustedError as e:
+            logger.error(f"[{self.name}] All retries exhausted: {e}")
+            await self.message_bus.publish("llm.response", {
+                "text": "I'm sorry, I'm having persistent issues. Please try again in a moment.",
+                "location": data.get("location", "unknown"),
+                "error": True
+            })
+            
         except Exception as e:
             logger.exception(f"[{self.name}] Error handling transcription: {e}")
             self.increment_error_count()
             
-            # Send error response
             await self.message_bus.publish("llm.response", {
                 "text": "I'm sorry, I encountered an error processing that. Could you try again?",
                 "location": data.get("location", "unknown"),
@@ -353,16 +341,11 @@ Always be helpful, accurate, and maintain your personality consistently."""
             response = await self._generate_response(user_text, source)
             generation_time = (datetime.now() - start_time).total_seconds()
 
-            # Publish metrics
-            await self.publish_metric("generation_time", generation_time, "seconds")
-            await self.publish_metric("input_length", len(user_text), "characters")
-            await self.publish_metric("output_length", len(response), "characters")
-
-            # Publish final response for GUI display
-            await self.message_bus.publish("llm.final_response", {
-                "response": response,
+            # Publish response for GUI
+            await self.message_bus.publish("llm.response", {
+                "text": response,
                 "location": source,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": timestamp_str,
                 "generation_time": generation_time
             })
 
@@ -371,25 +354,94 @@ Always be helpful, accurate, and maintain your personality consistently."""
                 f"({generation_time:.2f}s)"
             )
 
+        except CircuitBreakerOpenError as e:
+            logger.error(f"[{self.name}] Circuit breaker open: {e}")
+            await self.message_bus.publish("llm.response", {
+                "text": "I'm having trouble thinking right now. Give me a moment to recover.",
+                "location": data.get("source", "web_gui"),
+                "error": True
+            })
+            
+        except RetryExhaustedError as e:
+            logger.error(f"[{self.name}] All retries exhausted: {e}")
+            await self.message_bus.publish("llm.response", {
+                "text": "I'm sorry, I'm having persistent issues. Please try again in a moment.",
+                "location": data.get("source", "web_gui"),
+                "error": True
+            })
+            
         except Exception as e:
             logger.exception(f"[{self.name}] Error handling GUI message: {e}")
             self.increment_error_count()
 
-            # Send error response
-            await self.message_bus.publish("llm.final_response", {
-                "response": "I'm sorry, I encountered an error processing that. Could you try again?",
+            await self.message_bus.publish("llm.response", {
+                "text": "I'm sorry, I encountered an error processing that. Could you try again?",
                 "location": data.get("source", "web_gui"),
-                "error": True,
-                "timestamp": datetime.now().isoformat()
+                "error": True
             })
 
-    async def _generate_response(self, user_input: str, location: str) -> str:
+    @retry_with_backoff(
+        max_retries=3,
+        base_delay=1.0,
+        exceptions=(ollama.ResponseError, asyncio.TimeoutError, ConnectionError)
+    )
+    async def _call_ollama_with_retry(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Call Ollama API with retry logic and circuit breaker protection.
+        
+        Args:
+            model: Model name
+            messages: Conversation messages
+            tools: Available tools for function calling
+            options: Generation options
+            
+        Returns:
+            Ollama response dictionary
+            
+        Raises:
+            CircuitBreakerOpenError: If circuit breaker is open
+            RetryExhaustedError: If all retries failed
+        """
+        # Check circuit breaker
+        if self.ollama_breaker.is_open:
+            raise CircuitBreakerOpenError(
+                "Ollama service is temporarily unavailable. Please try again in a moment."
+            )
+        
+        try:
+            response = await self.client.chat(
+                model=model,
+                messages=messages,
+                tools=tools,
+                options=options or {}
+            )
+            
+            # Success - reset circuit breaker failure count
+            self.ollama_breaker._on_success()
+            return response
+            
+        except Exception as e:
+            # Record failure in circuit breaker
+            self.ollama_breaker._on_failure(e)
+            raise
+
+    async def _generate_response(
+        self,
+        user_text: str,
+        location: str = "unknown"
+    ) -> str:
         """
         Generate a response using the LLM.
         
         Args:
-            user_input: The user's transcribed speech
-            location: The location where the user is speaking from
+            user_text: User's input text
+            location: Source location identifier
             
         Returns:
             Generated response text
@@ -397,62 +449,41 @@ Always be helpful, accurate, and maintain your personality consistently."""
         Raises:
             LLMEngineError: If generation fails
         """
-        if not self.client:
-            raise LLMEngineError("LLM client not initialized")
-            
         try:
             # Add user message to history
             self.conversation_history.append({
                 "role": "user",
-                "content": user_input
+                "content": user_text
             })
             
-            # Trim history to max length (keep pairs of user/assistant messages)
+            # Trim history if needed
             if len(self.conversation_history) > self.max_history_length:
-                # Keep the most recent messages
                 self.conversation_history = self.conversation_history[-self.max_history_length:]
-                logger.debug(
-                    f"[{self.name}] Trimmed conversation history to "
-                    f"{len(self.conversation_history)} messages"
-                )
             
             # Build messages for LLM
             messages = [
                 {"role": "system", "content": self.system_prompt}
             ] + self.conversation_history
             
-            # Add location context
-            if location != "unknown":
-                messages.append({
-                    "role": "system",
-                    "content": f"Note: The user is currently at the {location}."
-                })
-            
-            logger.debug(f"[{self.name}] Generating response with {len(messages)} messages")
-
-            # Prepare tools for Ollama if available and MCP is enabled
+            # Prepare tools for function calling
             tools_param = None
-            if config.mcp_enabled and self.available_tools:
+            if self.available_tools:
                 tools_param = list(self.available_tools.values())
-                logger.debug(
-                    f"[{self.name}] Including {len(tools_param)} tools in LLM call"
-                )
+                logger.debug(f"[{self.name}] Available tools: {len(tools_param)}")
 
             # Generate response (with potential tool calls)
-            max_tool_iterations = 5  # Prevent infinite tool calling loops
+            max_tool_iterations = 5
             iteration = 0
 
             while iteration < max_tool_iterations:
                 iteration += 1
 
-                # Call LLM
-                response = await self.client.chat(
-                    model=config.ollama_model,
+                # Call LLM with retry protection
+                response = await self._call_ollama_with_retry(
+                    model=config.ollama.model,
                     messages=messages,
                     tools=tools_param,
-                    options={
-                        "temperature": config.ollama_temperature,
-                    }
+                    options={"temperature": config.ollama.options.get("temperature", 0.7)}
                 )
 
                 assistant_message = response['message']
@@ -470,7 +501,7 @@ Always be helpful, accurate, and maintain your personality consistently."""
                     f"[{self.name}] 🔧 LLM requested {len(tool_calls)} tool call(s)"
                 )
 
-                # Add assistant's tool call message to history
+                # Add assistant message with tool calls to history
                 messages.append(assistant_message)
 
                 # Execute each tool call
@@ -527,6 +558,10 @@ Always be helpful, accurate, and maintain your personality consistently."""
             
             return assistant_response
             
+        except CircuitBreakerOpenError:
+            raise
+        except RetryExhaustedError:
+            raise
         except ollama.ResponseError as e:
             error_msg = f"Ollama API error: {e}"
             logger.error(f"[{self.name}] {error_msg}")
@@ -534,7 +569,7 @@ Always be helpful, accurate, and maintain your personality consistently."""
             raise LLMEngineError(error_msg) from e
             
         except asyncio.TimeoutError as e:
-            error_msg = f"LLM generation timed out after {config.ollama_timeout}s"
+            error_msg = f"LLM generation timed out"
             logger.error(f"[{self.name}] {error_msg}")
             self.increment_error_count()
             raise LLMEngineError(error_msg) from e
@@ -548,168 +583,97 @@ Always be helpful, accurate, and maintain your personality consistently."""
     async def _handle_tool_registry(self, data: Dict[str, Any]) -> None:
         """
         Handle tool registry updates from MCP Gateway.
-
+        
         Args:
-            data: Tool registry message with format:
-                {
-                    "tools": List[Dict],
-                    "tool_count": int,
-                    "servers": List[str],
-                    "timestamp": str
-                }
+            data: Tool registry data containing available tools
         """
         try:
-            tools = data.get("tools", [])
-            tool_count = data.get("tool_count", 0)
-
-            # Convert to format suitable for Ollama
-            self.available_tools = {}
-            for tool in tools:
-                tool_name = tool.get("name")
-                if tool_name:
-                    self.available_tools[tool_name] = {
-                        "type": "function",
-                        "function": {
-                            "name": tool_name,
-                            "description": tool.get("description", ""),
-                            "parameters": tool.get("inputSchema", {})
-                        }
-                    }
-
+            tools = data.get("tools", {})
+            self.available_tools = tools
             logger.info(
-                f"[{self.name}] 🔧 Tool registry updated: {tool_count} tools available"
+                f"[{self.name}] Updated tool registry: {len(tools)} tools available"
             )
-
-            if config.mcp_log_tool_calls:
-                logger.debug(
-                    f"[{self.name}] Available tools: {list(self.available_tools.keys())}"
-                )
-
         except Exception as e:
-            logger.error(f"[{self.name}] Error handling tool registry: {e}")
-
-    async def _handle_tool_result(self, data: Dict[str, Any]) -> None:
-        """
-        Handle tool execution results from MCP Gateway.
-
-        Args:
-            data: Tool result message with format:
-                {
-                    "request_id": str,
-                    "tool_name": str,
-                    "result": Any,
-                    "success": bool,
-                    "error": str (optional),
-                    "duration": float
-                }
-        """
-        try:
-            request_id = data.get("request_id")
-            if request_id:
-                self._pending_tool_results[request_id] = data
-
-        except Exception as e:
-            logger.error(f"[{self.name}] Error handling tool result: {e}")
+            logger.exception(f"[{self.name}] Error updating tool registry: {e}")
 
     async def _execute_tool_call(
         self,
         tool_name: str,
         arguments: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """
         Execute a tool call via MCP Gateway.
-
+        
         Args:
-            tool_name: Name of the tool to call
+            tool_name: Name of the tool to execute
             arguments: Tool arguments
-
+            
         Returns:
             Tool execution result
-
+            
         Raises:
             LLMEngineError: If tool execution fails
         """
         try:
-            request_id = str(uuid.uuid4())
-
-            logger.info(f"[{self.name}] 🔧 Executing tool: {tool_name}")
-
-            if config.mcp_log_tool_calls:
-                logger.debug(f"[{self.name}] Tool arguments: {arguments}")
-
-            # Send tool execution request
-            await self.message_bus.publish("mcp.tool.execute", {
-                "request_id": request_id,
+            call_id = str(uuid.uuid4())
+            
+            logger.info(
+                f"[{self.name}] Executing tool: {tool_name} with args: {arguments}"
+            )
+            
+            # Publish tool execution request
+            await self.message_bus.publish("mcp.tool_call", {
+                "call_id": call_id,
                 "tool_name": tool_name,
                 "arguments": arguments
             })
-
-            # Wait for result (with timeout)
-            timeout = config.mcp_tool_timeout
-            start_time = datetime.now()
-
-            while (datetime.now() - start_time).total_seconds() < timeout:
-                if request_id in self._pending_tool_results:
-                    result_data = self._pending_tool_results.pop(request_id)
-
-                    if result_data.get("success"):
-                        logger.success(
-                            f"[{self.name}] ✓ Tool '{tool_name}' completed in "
-                            f"{result_data.get('duration', 0):.2f}s"
-                        )
-                        self.tool_call_count += 1
-                        return result_data.get("result")
-                    else:
-                        error = result_data.get("error", "Unknown error")
-                        raise LLMEngineError(f"Tool execution failed: {error}")
-
+            
+            # Wait for result with timeout
+            timeout = 30.0
+            start_time = asyncio.get_event_loop().time()
+            
+            while asyncio.get_event_loop().time() - start_time < timeout:
+                if call_id in self._pending_tool_results:
+                    result = self._pending_tool_results.pop(call_id)
+                    
+                    if result.get("error"):
+                        raise LLMEngineError(f"Tool error: {result['error']}")
+                    
+                    return result.get("result", "Tool executed successfully")
+                
                 await asyncio.sleep(0.1)
-
-            # Timeout
-            raise LLMEngineError(
-                f"Tool execution timed out after {timeout}s"
-            )
-
+            
+            raise LLMEngineError(f"Tool execution timeout: {tool_name}")
+            
         except LLMEngineError:
             raise
         except Exception as e:
-            error_msg = f"Tool execution error for '{tool_name}': {e}"
-            logger.error(f"[{self.name}] {error_msg}")
+            error_msg = f"Failed to execute tool {tool_name}: {e}"
+            logger.exception(f"[{self.name}] {error_msg}")
             raise LLMEngineError(error_msg) from e
 
-    async def health_check(self) -> bool:
+    async def get_status(self) -> Dict[str, Any]:
         """
-        Perform a health check on the LLM Engine.
+        Get current LLM Engine status.
         
         Returns:
-            True if healthy, False otherwise
+            Status dictionary with metrics and health info
         """
-        if not await super().health_check():
-            return False
-            
-        try:
-            if not self.client:
-                return False
-                
-            # Test if we can list models
-            await asyncio.wait_for(self.client.list(), timeout=5.0)
-            return True
-            
-        except Exception as e:
-            logger.warning(f"[{self.name}] Health check failed: {e}")
-            return False
-            
+        return {
+            "service": self.name,
+            "healthy": self._healthy,
+            "running": self._running,
+            "model": config.ollama.model,
+            "ollama_host": config.ollama.host,
+            "conversation_length": len(self.conversation_history),
+            "generation_count": self._generation_count,
+            "total_tokens": self._total_tokens,
+            "available_tools": len(self.available_tools),
+            "circuit_breaker": self.ollama_breaker.get_stats(),
+            "error_count": self._error_count
+        }
+
     def clear_history(self) -> None:
-        """Clear the conversation history."""
-        history_length = len(self.conversation_history)
-        self.conversation_history.clear()
-        logger.info(f"[{self.name}] Cleared {history_length} messages from conversation history")
-        
-    def get_history_length(self) -> int:
-        """
-        Get the current conversation history length.
-        
-        Returns:
-            Number of messages in history
-        """
-        return len(self.conversation_history)
+        """Clear conversation history."""
+        self.conversation_history = []
+        logger.info(f"[{self.name}] Conversation history cleared")
