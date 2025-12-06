@@ -279,6 +279,94 @@ class FreyaConfig(BaseSettings):
         description="Log all tool calls and results for debugging"
     )
 
+    # ==================== Notification Configuration ====================
+    notification_email_enabled: bool = Field(
+        default=False,
+        description="Enable email notifications"
+    )
+
+    notification_email_smtp_host: str = Field(
+        default="smtp.gmail.com",
+        description="SMTP server hostname for email notifications"
+    )
+
+    notification_email_smtp_port: int = Field(
+        default=587,
+        ge=1,
+        le=65535,
+        description="SMTP server port"
+    )
+
+    notification_email_from: str = Field(
+        default="freya@example.com",
+        description="Email sender address"
+    )
+
+    notification_email_username: Optional[str] = Field(
+        default=None,
+        description="SMTP authentication username"
+    )
+
+    notification_email_password: Optional[str] = Field(
+        default=None,
+        description="SMTP authentication password"
+    )
+
+    notification_webhook_enabled: bool = Field(
+        default=False,
+        description="Enable webhook notifications"
+    )
+
+    notification_webhook_url: Optional[str] = Field(
+        default=None,
+        description="Webhook URL for notifications"
+    )
+
+    notification_webhook_secret: Optional[str] = Field(
+        default=None,
+        description="Webhook secret for request signing"
+    )
+
+    notification_push_enabled: bool = Field(
+        default=False,
+        description="Enable push notifications"
+    )
+
+    notification_push_provider: Literal["fcm", "apns", "none"] = Field(
+        default="none",
+        description="Push notification provider"
+    )
+
+    notification_push_api_key: Optional[str] = Field(
+        default=None,
+        description="Push notification API key"
+    )
+
+    notification_sms_enabled: bool = Field(
+        default=False,
+        description="Enable SMS notifications"
+    )
+
+    notification_sms_provider: Literal["twilio", "none"] = Field(
+        default="none",
+        description="SMS provider"
+    )
+
+    notification_sms_account_sid: Optional[str] = Field(
+        default=None,
+        description="SMS provider account SID (e.g., Twilio)"
+    )
+
+    notification_sms_auth_token: Optional[str] = Field(
+        default=None,
+        description="SMS provider auth token"
+    )
+
+    notification_sms_from_number: Optional[str] = Field(
+        default=None,
+        description="SMS sender phone number"
+    )
+
     # ==================== Logging Configuration ====================
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO",
